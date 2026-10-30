@@ -53,9 +53,32 @@ pub fn append_bytes<'gc>(
     }
 
     let arg0 = args.get_object(activation, 0, "bytes")?;
-    let mut bytes = arg0.as_bytearray().unwrap().bytes().to_vec();
+    let bytes = arg0.as_bytearray().unwrap().bytes().to_vec();
 
-    netstream.append_bytes(activation.context, &mut bytes);
+    netstream.append_bytes(activation.context, &bytes);
+
+    Ok(Value::Undefined)
+}
+
+pub fn append_bytes_action<'gc>(
+    activation: &mut Activation<'_, 'gc>,
+    this: Value<'gc>,
+    args: FunctionArgs<'_, 'gc>,
+) -> Result<Value<'gc>, Error<'gc>> {
+    let this = this.as_object().unwrap();
+
+    let Some(netstream) = this.as_netstream() else {
+        return Ok(Value::Undefined);
+    };
+
+    // Flash throws the same error outside data generation mode and for an
+    // unknown action.
+    let action = args.get_string(activation, 0);
+    if !netstream.is_data_generation_mode()
+        || !netstream.append_bytes_action(activation.context, &action.to_utf8_lossy())
+    {
+        return Err(make_error_2004(activation, Error2004Type::TypeError));
+    }
 
     Ok(Value::Undefined)
 }
