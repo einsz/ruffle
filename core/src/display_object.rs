@@ -18,9 +18,10 @@ use gc_arena::barrier::{Write, unlock};
 use gc_arena::lock::Lock;
 use gc_arena::{Collect, Gc, Mutation};
 use ruffle_macros::{enum_trait_object, istr};
+use ruffle_render::matrix3d::Matrix3D;
 use ruffle_render::perspective_projection::PerspectiveProjection;
 use ruffle_render::pixel_bender::PixelBenderShaderHandle;
-use ruffle_render::transform::{Transform, TransformStack};
+use ruffle_render::transform::Transform;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -409,7 +410,11 @@ impl<'gc> DisplayObjectBase<'gc> {
             },
             color_transform: self.color_transform.get(),
             perspective_projection: self.perspective_projection.get(),
-            tz: self.tz.get(),
+            matrix3d: (apply_matrix && self.tz.get() != 0.0).then(|| {
+                let mut matrix3d = Matrix3D::from_matrix(self.matrix.get());
+                matrix3d.set_tz(self.tz.get() as f32);
+                matrix3d
+            }),
         }
     }
 
@@ -965,6 +970,15 @@ struct DrawCacheInfo {
     filters: Vec<Filter>,
 }
 
+/// Whether any descendant of this object is 3D.
+fn has_3d_descendant(this: DisplayObject<'_>) -> bool {
+    this.as_container().is_some_and(|container| {
+        container
+            .iter_render_list()
+            .any(|child| child.z() != 0.0 || has_3d_descendant(child))
+    })
+}
+
 pub fn render_base<'gc>(
     this: DisplayObject<'gc>,
     context: &mut RenderContext<'_, 'gc>,
@@ -990,11 +1004,25 @@ pub fn render_base<'gc>(
     let cache_info = if context.use_bitmap_cache && this.is_bitmap_cached() {
         let mut cache_info: Option<DrawCacheInfo> = None;
         let base_transform = context.transform_stack.transform();
-        let bounds: Rectangle<Twips> = this.render_bounds_with_transform(
+        let mut bounds: Rectangle<Twips> = this.render_bounds_with_transform(
             &base_transform.matrix,
             false, // we want to do the filter growth for this object ourselves, to know the offsets
             &context.stage.view_matrix(),
         );
+        // 3D objects inside are projected according to where this object is on
+        // the screen, and with the perspective projections of its ancestors.
+        let has_projected_3d = base_transform.matrix3d.is_none() && has_3d_descendant(this);
+        if has_projected_3d {
+            // They can extend beyond the bounds, which are not projected yet,
+            // so also cache everything on the screen.
+            let viewport = context.renderer.viewport_dimensions();
+            bounds = bounds.union(&Rectangle {
+                x_min: Twips::ZERO,
+                y_min: Twips::ZERO,
+                x_max: Twips::from_pixels_i32(viewport.width as i32),
+                y_max: Twips::from_pixels_i32(viewport.height as i32),
+            });
+        }
         let name = this.name();
         let mut filters: Vec<Filter> = this.filters().to_owned();
         let swf_version = this.swf_version();
@@ -1025,7 +1053,9 @@ pub fn render_base<'gc>(
                     y_max: filter_rect.y_max.to_pixels().ceil() as i32,
                 };
                 let draw_offset = Point::new(filter_rect.x_min, filter_rect.y_min);
-                if cache.is_dirty(&base_transform.matrix, width, height) {
+                // Redraw projected 3D objects every frame, as their projection
+                // changes with anything above this object.
+                if has_projected_3d || cache.is_dirty(&base_transform.matrix, width, height) {
                     cache.update(
                         context.renderer,
                         base_transform.matrix,
@@ -1082,7 +1112,10 @@ pub fn render_base<'gc>(
             + Twips::from_pixels_i32(cache_info.draw_offset.y);
 
         if cache_info.dirty {
-            let mut transform_stack = TransformStack::new();
+            let mut transform_stack = context.transform_stack.offscreen(Matrix::translate(
+                cache_info.base_transform.matrix.tx + offset_x,
+                cache_info.base_transform.matrix.ty + offset_y,
+            ));
             transform_stack.push(&Transform {
                 color_transform: Default::default(),
                 matrix: Matrix {
@@ -1091,7 +1124,7 @@ pub fn render_base<'gc>(
                     ..cache_info.base_transform.matrix
                 },
                 perspective_projection: cache_info.base_transform.perspective_projection,
-                tz: Default::default(),
+                matrix3d: None,
             });
             let mut offscreen_context = RenderContext {
                 renderer: context.renderer,
@@ -1120,17 +1153,29 @@ pub fn render_base<'gc>(
             context,
             |context| {
                 let region = cache_info.bitmap.full_region();
+                let transform = context.transform_stack.transform();
+                // A 3D object's image holds its flattened matrix, so map the image
+                // back to the object's space and transform that in 3D.
+                let matrix3d = transform.matrix3d.and_then(|matrix3d| {
+                    let image_matrix = Matrix {
+                        tx: -offset_x,
+                        ty: -offset_y,
+                        ..cache_info.base_transform.matrix
+                    };
+                    let image_to_object = Matrix3D::from_matrix(image_matrix.inverse()?);
+                    Some(matrix3d.multiply(&image_to_object))
+                });
                 context.commands.render_bitmap(
                     cache_info.bitmap.handle,
                     Transform {
                         matrix: Matrix {
-                            tx: context.transform_stack.transform().matrix.tx + offset_x,
-                            ty: context.transform_stack.transform().matrix.ty + offset_y,
+                            tx: transform.matrix.tx + offset_x,
+                            ty: transform.matrix.ty + offset_y,
                             ..Default::default()
                         },
                         color_transform: cache_info.base_transform.color_transform,
                         perspective_projection: cache_info.base_transform.perspective_projection,
-                        tz: cache_info.base_transform.tz,
+                        matrix3d,
                     },
                     true,
                     PixelSnapping::Always, // cacheAsBitmap forces pixel snapping
@@ -1199,15 +1244,15 @@ pub fn apply_standard_mask_and_scroll<'gc, F>(
 {
     let scroll_rect_matrix = if let Some(rect) = this.scroll_rect() {
         let cur_transform = context.transform_stack.transform();
-        // The matrix we use for actually drawing a rectangle for cropping purposes
+        // The transform and matrix we use for actually drawing a rectangle for cropping purposes
         // Note that we do *not* apply the translation yet
-        Some(
-            cur_transform.matrix
-                * Matrix::scale(
-                    rect.width().to_pixels() as f32,
-                    rect.height().to_pixels() as f32,
-                ),
-        )
+        Some((
+            cur_transform,
+            Matrix::scale(
+                rect.width().to_pixels() as f32,
+                rect.height().to_pixels() as f32,
+            ),
+        ))
     } else {
         None
     };
@@ -1218,7 +1263,7 @@ pub fn apply_standard_mask_and_scroll<'gc, F>(
             matrix: Matrix::translate(-rect.x_min, -rect.y_min),
             color_transform: Default::default(),
             perspective_projection: None,
-            tz: 0.0,
+            matrix3d: None,
         });
     }
 
@@ -1249,10 +1294,10 @@ pub fn apply_standard_mask_and_scroll<'gc, F>(
     // with 'DisplayObject.mask'. We will end up rendering content that
     // lies in the intersection of the scroll rect and DisplayObject.mask,
     // which is exactly the behavior that we want.
-    if let Some(rect_mat) = scroll_rect_matrix {
+    if let Some((transform, rect_mat)) = &scroll_rect_matrix {
         context.commands.push_mask();
         // The color doesn't matter, as this is a mask.
-        context.commands.draw_rect(Color::WHITE, rect_mat);
+        transform.draw_rect(&mut context.commands, Color::WHITE, *rect_mat);
         context.commands.activate_mask();
     }
 
@@ -1281,11 +1326,11 @@ pub fn apply_standard_mask_and_scroll<'gc, F>(
         draw(context);
     }
 
-    if let Some(rect_mat) = scroll_rect_matrix {
+    if let Some((transform, rect_mat)) = &scroll_rect_matrix {
         // Draw the rectangle again after deactivating the mask,
         // to reset the stencil buffer.
         context.commands.deactivate_mask();
-        context.commands.draw_rect(Color::WHITE, rect_mat);
+        transform.draw_rect(&mut context.commands, Color::WHITE, *rect_mat);
         context.commands.pop_mask();
     }
 
