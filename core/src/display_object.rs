@@ -272,7 +272,9 @@ pub struct DisplayObjectBase<'gc> {
     matrix: Cell<Matrix>,
     color_transform: Cell<ColorTransform>,
     perspective_projection: Cell<Option<PerspectiveProjection>>,
-    tz: Cell<f64>,
+    /// The 3D matrix, if this object is 3D. `matrix` is then its projection
+    /// onto the XY plane.
+    matrix3d: Cell<Option<Matrix3D>>,
 
     // Cached transform properties `_xscale`, `_yscale`, `_rotation`.
     // These are expensive to calculate, so they will be calculated and cached
@@ -281,6 +283,11 @@ pub struct DisplayObjectBase<'gc> {
     scale_x: Cell<Percent>,
     scale_y: Cell<Percent>,
     skew: Cell<f64>,
+    // And for 3D objects, also `rotationX`, `rotationY` and `scaleZ`.
+    // `rotation` is then `rotationZ`.
+    rotation_x: Cell<Degrees>,
+    rotation_y: Cell<Degrees>,
+    scale_z: Cell<f64>,
 
     /// The sound transform of sounds playing via this display object.
     sound_transform: Cell<SoundTransform>,
@@ -349,11 +356,14 @@ impl Default for DisplayObjectBase<'_> {
             matrix: Default::default(),
             color_transform: Default::default(),
             perspective_projection: Default::default(),
-            tz: Cell::new(0.0),
+            matrix3d: Cell::new(None),
             rotation: Cell::new(Degrees::from_radians(0.0)),
             scale_x: Cell::new(Percent::from_unit(1.0)),
             scale_y: Cell::new(Percent::from_unit(1.0)),
             skew: Cell::new(0.0),
+            rotation_x: Cell::new(Degrees::from_radians(0.0)),
+            rotation_y: Cell::new(Degrees::from_radians(0.0)),
+            scale_z: Cell::new(1.0),
             masker: Lock::new(None),
             maskee: Lock::new(None),
             meta_data: Lock::new(None),
@@ -410,11 +420,11 @@ impl<'gc> DisplayObjectBase<'gc> {
             },
             color_transform: self.color_transform.get(),
             perspective_projection: self.perspective_projection.get(),
-            matrix3d: (apply_matrix && self.tz.get() != 0.0).then(|| {
-                let mut matrix3d = Matrix3D::from_matrix(self.matrix.get());
-                matrix3d.set_tz(self.tz.get() as f32);
-                matrix3d
-            }),
+            matrix3d: if apply_matrix {
+                self.matrix3d.get()
+            } else {
+                None
+            },
         }
     }
 
@@ -422,9 +432,56 @@ impl<'gc> DisplayObjectBase<'gc> {
         self.matrix.get()
     }
 
+    /// Sets the 2D matrix, making this object 2D.
     pub fn set_matrix(&self, matrix: Matrix) {
         self.matrix.set(matrix);
+        self.matrix3d.set(None);
         self.set_scale_rotation_cached(false);
+    }
+
+    pub fn matrix3d(&self) -> Option<Matrix3D> {
+        self.matrix3d.get()
+    }
+
+    /// Sets the 3D matrix. `None` makes this object 2D with an identity matrix.
+    pub fn set_matrix3d(&self, matrix3d: Option<Matrix3D>) {
+        self.matrix3d.set(matrix3d);
+        self.matrix
+            .set(matrix3d.map_or(Matrix::IDENTITY, Matrix3D::to_matrix));
+        self.set_scale_rotation_cached(false);
+    }
+
+    /// Makes this object 3D, keeping its 2D matrix.
+    fn make_3d(&self) -> Matrix3D {
+        self.matrix3d.get().unwrap_or_else(|| {
+            let matrix3d = Matrix3D::from_matrix(self.matrix.get());
+            self.matrix3d.set(Some(matrix3d));
+            self.set_scale_rotation_cached(false);
+            matrix3d
+        })
+    }
+
+    /// Updates the 3D matrix from the cached translation, rotation and scale.
+    fn recompose_matrix3d(&self) {
+        let translation = self.make_3d().raw_data;
+        let rotation = |degrees: Degrees| {
+            let radians = degrees.into_radians();
+            if radians.is_nan() { 0.0 } else { radians }
+        };
+        let scale = |unit: f64| if unit.is_nan() { 0.0 } else { unit as f32 };
+        let matrix3d = Matrix3D::translate(translation[12], translation[13], translation[14])
+            .multiply(&Matrix3D::euler_rotation(
+                rotation(self.rotation_x.get()),
+                rotation(self.rotation_y.get()),
+                rotation(self.rotation.get()),
+            ))
+            .multiply(&Matrix3D::scale(
+                scale(self.scale_x.get().unit()),
+                scale(self.scale_y.get().unit()),
+                scale(self.scale_z.get()),
+            ));
+        self.matrix3d.set(Some(matrix3d));
+        self.matrix.set(matrix3d.to_matrix());
     }
 
     pub fn color_transform(&self) -> ColorTransform {
@@ -456,6 +513,10 @@ impl<'gc> DisplayObjectBase<'gc> {
         let changed = matrix.tx != x;
         matrix.tx = x;
         self.matrix.set(matrix);
+        if let Some(mut matrix3d) = self.matrix3d.get() {
+            matrix3d.raw_data[12] = x.to_pixels() as f32;
+            self.matrix3d.set(Some(matrix3d));
+        }
         self.set_transformed_by_script(true);
         changed
     }
@@ -469,18 +530,25 @@ impl<'gc> DisplayObjectBase<'gc> {
         let changed = matrix.ty != y;
         matrix.ty = y;
         self.matrix.set(matrix);
+        if let Some(mut matrix3d) = self.matrix3d.get() {
+            matrix3d.raw_data[13] = y.to_pixels() as f32;
+            self.matrix3d.set(Some(matrix3d));
+        }
         self.set_transformed_by_script(true);
         changed
     }
 
     fn z(&self) -> f64 {
-        self.tz.get()
+        self.matrix3d.get().map_or(0.0, |m| m.tz().into())
     }
 
-    fn set_z(&self, tz: f64) -> bool {
-        let changed = self.tz.get() != tz;
+    /// Sets `z`, making this object 3D.
+    fn set_z(&self, z: f64) -> bool {
+        let changed = self.matrix3d.get().is_none() || self.z() != z;
         self.set_transformed_by_script(true);
-        self.tz.set(tz);
+        let mut matrix3d = self.make_3d();
+        matrix3d.set_tz(z as f32);
+        self.matrix3d.set(Some(matrix3d));
         changed
     }
 
@@ -489,6 +557,22 @@ impl<'gc> DisplayObjectBase<'gc> {
     /// `_rotation` is accessed.
     fn cache_scale_rotation(&self) {
         if !self.scale_rotation_cached() {
+            if let Some(matrix3d) = self.matrix3d.get() {
+                let ([rotation_x, rotation_y, rotation_z], [scale_x, scale_y, scale_z]) =
+                    matrix3d.decompose_rotation_scale();
+                self.rotation_x.set(Degrees::from_radians(rotation_x));
+                self.rotation_y.set(Degrees::from_radians(rotation_y));
+                self.rotation.set(Degrees::from_radians(rotation_z));
+                self.scale_x.set(Percent::from_unit(scale_x));
+                self.scale_y.set(Percent::from_unit(scale_y));
+                self.scale_z.set(scale_z);
+                self.skew.set(0.0);
+                return;
+            }
+            self.rotation_x.set(Degrees::from_radians(0.0));
+            self.rotation_y.set(Degrees::from_radians(0.0));
+            self.scale_z.set(1.0);
+
             let Matrix { a, b, c, d, .. } = self.matrix.get();
             let a = f64::from(a);
             let b = f64::from(b);
@@ -531,6 +615,11 @@ impl<'gc> DisplayObjectBase<'gc> {
         let changed = self.rotation.get() != degrees;
         self.rotation.set(degrees);
 
+        if self.matrix3d.get().is_some() {
+            self.recompose_matrix3d();
+            return changed;
+        }
+
         // FIXME - this isn't quite correct. In Flash player,
         // trying to set rotation to NaN does nothing if the current
         // matrix 'b' and 'd' terms are both zero. However, if one
@@ -572,6 +661,11 @@ impl<'gc> DisplayObjectBase<'gc> {
         self.cache_scale_rotation();
         self.scale_x.set(value);
 
+        if self.matrix3d.get().is_some() {
+            self.recompose_matrix3d();
+            return changed;
+        }
+
         // Note - in order to match Flash's behavior, the 'scale_x' field is set to NaN
         // (which gets reported back to ActionScript), but we treat it as 0 for
         // the purposes of updating the matrix
@@ -607,6 +701,11 @@ impl<'gc> DisplayObjectBase<'gc> {
         self.cache_scale_rotation();
         self.scale_y.set(value);
 
+        if self.matrix3d.get().is_some() {
+            self.recompose_matrix3d();
+            return changed;
+        }
+
         // Note - in order to match Flash's behavior, the 'scale_y' field is set to NaN
         // (which gets reported back to ActionScript), but we treat it as 0 for
         // the purposes of updating the matrix
@@ -629,6 +728,64 @@ impl<'gc> DisplayObjectBase<'gc> {
         matrix.d = (cos * value.unit()) as f32;
         self.matrix.set(matrix);
 
+        changed
+    }
+
+    fn rotation_x(&self) -> Degrees {
+        self.cache_scale_rotation();
+        self.rotation_x.get()
+    }
+
+    /// Sets `rotationX`, making this object 3D.
+    fn set_rotation_x(&self, degrees: Degrees) -> bool {
+        self.set_transformed_by_script(true);
+        let was_2d = self.matrix3d.get().is_none();
+        self.make_3d();
+        self.cache_scale_rotation();
+        let changed = was_2d || self.rotation_x.get() != degrees;
+        self.rotation_x.set(degrees);
+        self.recompose_matrix3d();
+        changed
+    }
+
+    fn rotation_y(&self) -> Degrees {
+        self.cache_scale_rotation();
+        self.rotation_y.get()
+    }
+
+    /// Sets `rotationY`, making this object 3D.
+    fn set_rotation_y(&self, degrees: Degrees) -> bool {
+        self.set_transformed_by_script(true);
+        let was_2d = self.matrix3d.get().is_none();
+        self.make_3d();
+        self.cache_scale_rotation();
+        let changed = was_2d || self.rotation_y.get() != degrees;
+        self.rotation_y.set(degrees);
+        self.recompose_matrix3d();
+        changed
+    }
+
+    /// Sets `rotationZ`, which is `rotation`, making this object 3D.
+    fn set_rotation_z(&self, degrees: Degrees) -> bool {
+        let was_2d = self.matrix3d.get().is_none();
+        self.make_3d();
+        self.set_rotation(degrees) || was_2d
+    }
+
+    fn scale_z(&self) -> f64 {
+        self.cache_scale_rotation();
+        self.scale_z.get()
+    }
+
+    /// Sets `scaleZ`, making this object 3D.
+    fn set_scale_z(&self, value: f64) -> bool {
+        self.set_transformed_by_script(true);
+        let was_2d = self.matrix3d.get().is_none();
+        self.make_3d();
+        self.cache_scale_rotation();
+        let changed = was_2d || self.scale_z.get() != value;
+        self.scale_z.set(value);
+        self.recompose_matrix3d();
         changed
     }
 
@@ -924,14 +1081,6 @@ impl<'gc> DisplayObjectBase<'gc> {
     fn set_meta_data(this: &Write<Self>, value: Avm2Object<'gc>) {
         unlock!(this, Self, meta_data).set(Some(value));
     }
-
-    pub fn has_matrix3d_stub(&self) -> bool {
-        self.contains_flag(DisplayObjectFlags::HAS_MATRIX3D_STUB)
-    }
-
-    pub fn set_has_matrix3d_stub(&self, value: bool) {
-        self.set_flag(DisplayObjectFlags::HAS_MATRIX3D_STUB, value)
-    }
 }
 
 /// Indicates which kind of bounds should be returned by `self_bounds`.
@@ -975,7 +1124,7 @@ fn has_3d_descendant(this: DisplayObject<'_>) -> bool {
     this.as_container().is_some_and(|container| {
         container
             .iter_render_list()
-            .any(|child| child.z() != 0.0 || has_3d_descendant(child))
+            .any(|child| child.matrix3d().is_some() || has_3d_descendant(child))
     })
 }
 
@@ -1773,6 +1922,104 @@ pub trait TDisplayObject<'gc>:
             if let Some(parent) = self.parent() {
                 // Self-transform changes are automatically handled,
                 // we only want to inform ancestors to avoid unnecessary invalidations for tx/ty
+                parent.invalidate_cached_bitmap();
+            }
+        }
+    }
+
+    /// The 3D matrix of this display object, if it is 3D.
+    #[no_dynamic]
+    fn matrix3d(self) -> Option<Matrix3D> {
+        self.base().matrix3d()
+    }
+
+    /// Sets the 3D matrix of this display object. `None` makes it 2D with an
+    /// identity matrix.
+    /// Set by the `transform.matrix3D` ActionScript property.
+    /// This invalidates any ancestors cacheAsBitmap automatically.
+    #[no_dynamic]
+    fn set_matrix3d(self, matrix3d: Option<Matrix3D>) {
+        self.base().set_matrix3d(matrix3d);
+        self.set_transformed_by_script(true);
+        if let Some(parent) = self.parent() {
+            parent.invalidate_cached_bitmap();
+        }
+    }
+
+    /// The rotation in degrees about the X axis, in local space.
+    /// Returned by the `rotationX` ActionScript property.
+    #[no_dynamic]
+    fn rotation_x(self) -> Degrees {
+        let degrees = self.base().rotation_x();
+        self.set_scale_rotation_cached();
+        degrees
+    }
+
+    /// Sets the rotation in degrees about the X axis, making this object 3D.
+    /// Set by the `rotationX` ActionScript property.
+    /// This invalidates any ancestors cacheAsBitmap automatically.
+    #[no_dynamic]
+    fn set_rotation_x(self, degrees: Degrees) {
+        if self.base().set_rotation_x(degrees) {
+            self.set_scale_rotation_cached();
+            if let Some(parent) = self.parent() {
+                parent.invalidate_cached_bitmap();
+            }
+        }
+    }
+
+    /// The rotation in degrees about the Y axis, in local space.
+    /// Returned by the `rotationY` ActionScript property.
+    #[no_dynamic]
+    fn rotation_y(self) -> Degrees {
+        let degrees = self.base().rotation_y();
+        self.set_scale_rotation_cached();
+        degrees
+    }
+
+    /// Sets the rotation in degrees about the Y axis, making this object 3D.
+    /// Set by the `rotationY` ActionScript property.
+    /// This invalidates any ancestors cacheAsBitmap automatically.
+    #[no_dynamic]
+    fn set_rotation_y(self, degrees: Degrees) {
+        if self.base().set_rotation_y(degrees) {
+            self.set_scale_rotation_cached();
+            if let Some(parent) = self.parent() {
+                parent.invalidate_cached_bitmap();
+            }
+        }
+    }
+
+    /// Sets the rotation in degrees about the Z axis, making this object 3D.
+    /// Set by the `rotationZ` ActionScript property; `rotation` returns it.
+    /// This invalidates any ancestors cacheAsBitmap automatically.
+    #[no_dynamic]
+    fn set_rotation_z(self, degrees: Degrees) {
+        if self.base().set_rotation_z(degrees) {
+            self.set_scale_rotation_cached();
+            if let Some(parent) = self.parent() {
+                parent.invalidate_cached_bitmap();
+            }
+        }
+    }
+
+    /// The Z axis scale, in local space.
+    /// Returned by the `scaleZ` ActionScript property.
+    #[no_dynamic]
+    fn scale_z(self) -> f64 {
+        let scale = self.base().scale_z();
+        self.set_scale_rotation_cached();
+        scale
+    }
+
+    /// Sets the Z axis scale, making this object 3D.
+    /// Set by the `scaleZ` ActionScript property.
+    /// This invalidates any ancestors cacheAsBitmap automatically.
+    #[no_dynamic]
+    fn set_scale_z(self, value: f64) {
+        if self.base().set_scale_z(value) {
+            self.set_scale_rotation_cached();
+            if let Some(parent) = self.parent() {
                 parent.invalidate_cached_bitmap();
             }
         }
@@ -3116,9 +3363,6 @@ bitflags! {
 
         /// If this AVM1 object is pending removal (will be removed on the next frame).
         const AVM1_PENDING_REMOVAL     = 1 << 13;
-
-        /// Whether this object has matrix3D (used for stubbing).
-        const HAS_MATRIX3D_STUB        = 1 << 14;
 
         /// Whether this object has been placed by an AVM1 method,
         /// i.e. attachMovie, createEmptyMovieClip, duplicateMovieClip.
