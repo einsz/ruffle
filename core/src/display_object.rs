@@ -1106,11 +1106,26 @@ pub fn render_base<'gc>(
                 stage: context.stage,
             };
             this.render_self(&mut offscreen_context);
+            // As the areas of gradient filters show, Flash's image of an
+            // object reaches one pixel further right and down than its bounds.
+            let filter_source_rect = Rectangle {
+                x_min: Twips::from_pixels_i32(-cache_info.draw_offset.x),
+                y_min: Twips::from_pixels_i32(-cache_info.draw_offset.y),
+                x_max: Twips::from_pixels(
+                    cache_info.bounds.width().to_pixels().ceil() + 1.0
+                        - f64::from(cache_info.draw_offset.x),
+                ),
+                y_max: Twips::from_pixels(
+                    cache_info.bounds.height().to_pixels().ceil() + 1.0
+                        - f64::from(cache_info.draw_offset.y),
+                ),
+            };
             offscreen_context.cache_draws.push(BitmapCacheEntry {
                 handle: cache_info.bitmap.handle.clone(),
                 commands: offscreen_context.commands,
                 clear: this.opaque_background().unwrap_or_default(),
                 filters: cache_info.filters,
+                filter_source_rect,
             });
         }
 
