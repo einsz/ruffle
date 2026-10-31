@@ -1,0 +1,15 @@
+lineStyle(0): width 100, height 0
+lineStyle(2.7): width 102, height 2
+lineStyle(40): width 140, height 40
+lineStyle(255): width 355, height 255
+lineStyle(300): width 355, height 255
+lineStyle(-5): width 100, height 0
+lineStyle(Infinity): width 100, height 0
+lineStyle(-Infinity): width 100, height 0
+lineStyle(NaN): width 100, height 0
+lineStyle(2147483520): width 355, height 255
+lineStyle(2147483904): width 100, height 0
+lineStyle(-2147483520): width 100, height 0
+lineStyle(10000000000): width 100, height 0
+lineStyle(null): width 100, height 0
+lineStyle(40): width 140, height 40
