@@ -21,6 +21,7 @@ pub struct Shaders {
     pub blur_filter: wgpu::ShaderModule,
     pub glow_filter: wgpu::ShaderModule,
     pub bevel_filter: wgpu::ShaderModule,
+    pub gradient_filter: wgpu::ShaderModule,
     pub displacement_map_filter: wgpu::ShaderModule,
 }
 
@@ -65,6 +66,11 @@ impl Shaders {
             "filter/bevel.wgsl",
             include_str!("../shaders/filter/bevel.wgsl"),
         );
+        let gradient_filter = make_filter_shader(
+            device,
+            "filter/gradient.wgsl",
+            include_str!("../shaders/filter/gradient.wgsl"),
+        );
         let displacement_map_filter = make_filter_shader(
             device,
             "filter/displacement_map.wgsl",
@@ -106,6 +112,7 @@ impl Shaders {
             blur_filter,
             glow_filter,
             bevel_filter,
+            gradient_filter,
             displacement_map_filter,
         }
     }
