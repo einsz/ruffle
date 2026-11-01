@@ -1,18 +1,19 @@
 use crate::bitmap::BitmapSource;
 use crate::shape_utils::{DistilledShape, DrawCommand, DrawPath, GradientType};
 use indexmap::IndexSet;
-use lyon::path::Path;
+use lyon::algorithms::stroke::{self, StrokeToFillOptions, Stroker};
+use lyon::path::{FillRule, Path};
+use lyon::tessellation::FillOptions;
 use lyon::tessellation::{
-    self, FillTessellator, FillVertex, StrokeTessellator, StrokeVertex, StrokeVertexConstructor,
+    FillTessellator, FillVertex,
     geometry_builder::{BuffersBuilder, FillVertexConstructor, VertexBuffers},
 };
-use lyon::tessellation::{FillOptions, StrokeOptions};
 use swf::GradientRecord;
 use tracing::instrument;
 
 pub struct ShapeTessellator {
     fill_tess: FillTessellator,
-    stroke_tess: StrokeTessellator,
+    stroker: Stroker,
     mesh: Vec<Draw>,
     gradients: IndexSet<Gradient>,
     lyon_mesh: VertexBuffers<Vertex, u32>,
@@ -26,7 +27,7 @@ impl ShapeTessellator {
     pub fn new() -> Self {
         Self {
             fill_tess: FillTessellator::new(),
-            stroke_tess: StrokeTessellator::new(),
+            stroker: Stroker::new(),
             mesh: Vec::new(),
             gradients: IndexSet::new(),
             lyon_mesh: VertexBuffers::new(),
@@ -186,39 +187,47 @@ impl ShapeTessellator {
                     let width = width.max(min_screen_width);
 
                     // Larger scales require more precise tessellation to avoid artifacts
-                    let tolerance = StrokeOptions::DEFAULT_TOLERANCE / scale;
-                    let mut stroke_options = StrokeOptions::default()
-                        .with_line_width(width)
+                    let tolerance = StrokeToFillOptions::DEFAULT_TOLERANCE / scale;
+                    let mut stroke_options = StrokeToFillOptions::new(width)
                         .with_tolerance(tolerance)
                         .with_start_cap(match style.start_cap() {
-                            swf::LineCapStyle::None => tessellation::LineCap::Butt,
-                            swf::LineCapStyle::Round => tessellation::LineCap::Round,
-                            swf::LineCapStyle::Square => tessellation::LineCap::Square,
+                            swf::LineCapStyle::None => stroke::LineCap::Butt,
+                            swf::LineCapStyle::Round => stroke::LineCap::Round,
+                            swf::LineCapStyle::Square => stroke::LineCap::Square,
                         })
                         .with_end_cap(match style.end_cap() {
-                            swf::LineCapStyle::None => tessellation::LineCap::Butt,
-                            swf::LineCapStyle::Round => tessellation::LineCap::Round,
-                            swf::LineCapStyle::Square => tessellation::LineCap::Square,
+                            swf::LineCapStyle::None => stroke::LineCap::Butt,
+                            swf::LineCapStyle::Round => stroke::LineCap::Round,
+                            swf::LineCapStyle::Square => stroke::LineCap::Square,
                         });
 
                     let line_join = match style.join_style() {
-                        swf::LineJoinStyle::Round => tessellation::LineJoin::Round,
-                        swf::LineJoinStyle::Bevel => tessellation::LineJoin::Bevel,
+                        swf::LineJoinStyle::Round => stroke::LineJoin::Round,
+                        swf::LineJoinStyle::Bevel => stroke::LineJoin::Bevel,
                         swf::LineJoinStyle::Miter(limit) => {
                             // Avoid lyon assert with small miter limits.
                             let limit = limit.to_f32();
-                            if limit >= StrokeOptions::MINIMUM_MITER_LIMIT {
+                            if limit >= StrokeToFillOptions::MINIMUM_MITER_LIMIT {
                                 stroke_options = stroke_options.with_miter_limit(limit);
-                                tessellation::LineJoin::MiterClip
+                                stroke::LineJoin::MiterClip
                             } else {
-                                tessellation::LineJoin::Bevel
+                                stroke::LineJoin::Bevel
                             }
                         }
                     };
                     stroke_options = stroke_options.with_line_join(line_join);
-                    self.stroke_tess.tessellate_path(
-                        &lyon_path,
-                        &stroke_options,
+
+                    // Flash fills the area covered by a stroke once, even where the
+                    // stroke overlaps itself, so convert it to an outline and fill that
+                    // with the non-zero rule instead of tessellating the stroke directly.
+                    let mut outline = Path::builder();
+                    self.stroker
+                        .stroke_to_fill(lyon_path.iter(), &stroke_options, &mut outline);
+                    self.fill_tess.tessellate_path(
+                        &outline.build(),
+                        &FillOptions::default()
+                            .with_fill_rule(FillRule::NonZero)
+                            .with_tolerance(tolerance),
                         &mut buffers_builder,
                     )
                 }
@@ -454,16 +463,6 @@ struct RuffleVertexCtor {
 
 impl FillVertexConstructor<Vertex> for RuffleVertexCtor {
     fn new_vertex(&mut self, vertex: FillVertex) -> Vertex {
-        Vertex {
-            x: vertex.position().x,
-            y: vertex.position().y,
-            color: self.color,
-        }
-    }
-}
-
-impl StrokeVertexConstructor<Vertex> for RuffleVertexCtor {
-    fn new_vertex(&mut self, vertex: StrokeVertex) -> Vertex {
         Vertex {
             x: vertex.position().x,
             y: vertex.position().y,
