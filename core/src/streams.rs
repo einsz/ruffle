@@ -632,6 +632,9 @@ impl<'gc> NetStream<'gc> {
             .append(&mut AppendedFlv::HEADER.to_vec());
         self.0.appending.set(true);
         self.0.out_of_data.set(true);
+        // Seeking right after appending drops the data before it reports
+        // `NetStream.Buffer.Full`.
+        self.0.buffer_full_pending.set(false);
     }
 
     /// Implements `appendBytesAction()`.
@@ -640,7 +643,13 @@ impl<'gc> NetStream<'gc> {
     pub fn append_bytes_action(self, context: &mut UpdateContext<'gc>, action: &str) -> bool {
         match action {
             "resetBegin" => self.0.appended_flv.borrow_mut().reset(true),
-            "resetSeek" => self.0.appended_flv.borrow_mut().reset(false),
+            // Without a `seek()` first, Flash goes on after the data already
+            // appended, as after `RESET_BEGIN`.
+            "resetSeek" => self
+                .0
+                .appended_flv
+                .borrow_mut()
+                .reset(!self.0.seeking_appended.get()),
             "endSequence" => self.trigger_status_event(
                 context,
                 [("code", "NetStream.Buffer.Flush"), ("level", "status")],
@@ -1014,15 +1023,77 @@ impl<'gc> NetStream<'gc> {
         self.set_attached_to(context.gc(), Some(clip));
     }
 
+    /// The SWF sound format of an FLV audio tag.
+    fn flv_sound_format(audio_data: &FlvAudioData<'_>) -> Result<SoundFormat, NetstreamError> {
+        Ok(SoundFormat {
+            compression: match audio_data.format {
+                FlvSoundFormat::LinearPCMPlatformEndian => {
+                    AudioCompression::UncompressedUnknownEndian
+                }
+                FlvSoundFormat::Adpcm => AudioCompression::Adpcm,
+                FlvSoundFormat::MP3 => AudioCompression::Mp3,
+                FlvSoundFormat::LinearPCMLittleEndian => AudioCompression::Uncompressed,
+                FlvSoundFormat::Nellymoser16kHz => AudioCompression::Nellymoser16Khz,
+                FlvSoundFormat::Nellymoser8kHz => AudioCompression::Nellymoser8Khz,
+                FlvSoundFormat::Nellymoser => AudioCompression::Nellymoser,
+                FlvSoundFormat::G711ALawPCM => AudioCompression::G711ALawPCM,
+                FlvSoundFormat::G711MuLawPCM => AudioCompression::G711MuLawPCM,
+                FlvSoundFormat::Aac => AudioCompression::Aac,
+                FlvSoundFormat::Speex => AudioCompression::Speex,
+                FlvSoundFormat::MP38kHz => AudioCompression::Mp3,
+                FlvSoundFormat::DeviceSpecific => return Err(NetstreamError::UnknownCodec),
+            },
+            sample_rate: match (audio_data.format, audio_data.rate) {
+                (FlvSoundFormat::G711ALawPCM, _)
+                | (FlvSoundFormat::G711MuLawPCM, _)
+                | (FlvSoundFormat::MP38kHz, _) => 8_000,
+                (_, FlvSoundRate::R5_500) => 5_500,
+                (_, FlvSoundRate::R11_000) => 11_000,
+                (_, FlvSoundRate::R22_000) => 22_000,
+                (_, FlvSoundRate::R44_000) => 44_000,
+            },
+            is_stereo: match audio_data.sound_type {
+                FlvSoundType::Mono => false,
+                FlvSoundType::Stereo => true,
+            },
+            is_16_bit: match audio_data.size {
+                FlvSoundSize::Bits8 => false,
+                FlvSoundSize::Bits16 => true,
+            },
+        })
+    }
+
     /// Process a parsed FLV audio tag.
     ///
     /// `write` must be an active borrow of the current `NetStream`. `slice`
     /// must reference the underlying backing buffer.
     fn flv_audio_tag(
         self,
+        context: &mut UpdateContext<'gc>,
         slice: &Slice,
         audio_data: FlvAudioData<'_>,
+        is_lookahead_tag: bool,
     ) -> Result<(), NetstreamError> {
+        let swf_format = Self::flv_sound_format(&audio_data)?;
+        let source = self.source();
+        let is_new_format = matches!(
+            &*source.audio_stream.borrow(),
+            Some((_, info)) if info.stream_format != swf_format
+        );
+        if is_new_format {
+            // A file appended after `RESET_BEGIN` can have another audio
+            // format, which needs a decoder of its own. Switch once its first
+            // tag is due, so the current sound plays up to it.
+            if is_lookahead_tag {
+                return Ok(());
+            }
+            if let Some(instance) = source.sound_instance.take() {
+                context.audio.stop_sound(instance);
+                context.audio_manager.stop_sound(context.audio, instance);
+            }
+            source.audio_stream.replace(None);
+        }
+
         let is_aac_sequence_header =
             matches!(audio_data.data, FlvAudioDataType::AacSequenceHeader(_));
         let data = match audio_data.data {
@@ -1030,50 +1101,12 @@ impl<'gc> NetStream<'gc> {
             | FlvAudioDataType::AacSequenceHeader(data)
             | FlvAudioDataType::AacRaw(data) => slice.to_subslice(data),
         };
-        let source = self.source();
         let audio_stream = &mut *source.audio_stream.borrow_mut();
         let (substream, sound_stream_info) = match audio_stream {
             Some(audio_stream) => audio_stream,
             audio_stream => {
                 // None
                 let substream = Substream::new(slice.buffer().clone());
-                let swf_format = SoundFormat {
-                    compression: match audio_data.format {
-                        FlvSoundFormat::LinearPCMPlatformEndian => {
-                            AudioCompression::UncompressedUnknownEndian
-                        }
-                        FlvSoundFormat::Adpcm => AudioCompression::Adpcm,
-                        FlvSoundFormat::MP3 => AudioCompression::Mp3,
-                        FlvSoundFormat::LinearPCMLittleEndian => AudioCompression::Uncompressed,
-                        FlvSoundFormat::Nellymoser16kHz => AudioCompression::Nellymoser16Khz,
-                        FlvSoundFormat::Nellymoser8kHz => AudioCompression::Nellymoser8Khz,
-                        FlvSoundFormat::Nellymoser => AudioCompression::Nellymoser,
-                        FlvSoundFormat::G711ALawPCM => AudioCompression::G711ALawPCM,
-                        FlvSoundFormat::G711MuLawPCM => AudioCompression::G711MuLawPCM,
-                        FlvSoundFormat::Aac => AudioCompression::Aac,
-                        FlvSoundFormat::Speex => AudioCompression::Speex,
-                        FlvSoundFormat::MP38kHz => AudioCompression::Mp3,
-                        FlvSoundFormat::DeviceSpecific => return Err(NetstreamError::UnknownCodec),
-                    },
-                    sample_rate: match (audio_data.format, audio_data.rate) {
-                        (FlvSoundFormat::G711ALawPCM, _)
-                        | (FlvSoundFormat::G711MuLawPCM, _)
-                        | (FlvSoundFormat::MP38kHz, _) => 8_000,
-                        (_, FlvSoundRate::R5_500) => 5_500,
-                        (_, FlvSoundRate::R11_000) => 11_000,
-                        (_, FlvSoundRate::R22_000) => 22_000,
-                        (_, FlvSoundRate::R44_000) => 44_000,
-                    },
-                    is_stereo: match audio_data.sound_type {
-                        FlvSoundType::Mono => false,
-                        FlvSoundType::Stereo => true,
-                    },
-                    is_16_bit: match audio_data.size {
-                        FlvSoundSize::Bits8 => false,
-                        FlvSoundSize::Bits16 => true,
-                    },
-                };
-
                 let extra_data = if swf_format.compression == AudioCompression::Aac {
                     source.aac_config.borrow().clone()
                 } else {
@@ -1613,7 +1646,9 @@ impl<'gc> NetStream<'gc> {
                             max_lookahead_audio_tags -= 1;
                         }
 
-                        if let Err(e) = self.flv_audio_tag(&slice, audio_data) {
+                        if let Err(e) =
+                            self.flv_audio_tag(context, &slice, audio_data, is_lookahead_tag)
+                        {
                             //TODO: Fire an error event at AS.
                             tracing::error!("Error committing sound stream: {}", e);
                         }
@@ -1673,6 +1708,10 @@ impl<'gc> NetStream<'gc> {
             if !Gc::ptr_eq(source, self.source()) {
                 // The listener played something else.
                 return;
+            }
+            if source.offset.get() < source.buffer.borrow().len() {
+                // The listener appended more.
+                buffer_underrun = false;
             }
         }
 
