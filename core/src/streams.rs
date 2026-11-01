@@ -653,10 +653,17 @@ impl<'gc> NetStream<'gc> {
     }
 
     pub fn bytes_loaded(self) -> usize {
+        // Flash reports no bytes for appended data.
+        if self.0.data_generation_mode.get() {
+            return 0;
+        }
         self.source().buffer.borrow().len()
     }
 
     pub fn bytes_total(self) -> usize {
+        if self.0.data_generation_mode.get() {
+            return 0;
+        }
         let source = self.source();
         let buflen = source.buffer.borrow().len();
         std::cmp::max(source.expected_length.get().unwrap_or(buflen), buflen)
