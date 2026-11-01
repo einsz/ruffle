@@ -243,6 +243,10 @@ pub struct NetStreamSource {
     /// the expected playback format of that audio.
     audio_stream: RefCell<Option<(Substream, SoundStreamInfo)>>,
 
+    /// Where in `buffer` the last audio tag given to `audio_stream` ends, so
+    /// that lookahead doesn't give it a tag twice.
+    audio_source_end: Cell<usize>,
+
     /// The last AAC decoder configuration (`AudioSpecificConfig`) seen.
     ///
     /// It outlives `audio_stream`, which is dropped whenever the sound stops,
@@ -458,6 +462,7 @@ impl Default for NetStreamSource {
             stream_time: Cell::new(0.0),
             queued_seek_time: Cell::new(None),
             audio_stream: RefCell::new(None),
+            audio_source_end: Cell::new(0),
             aac_config: RefCell::new(None),
             sound_instance: Cell::new(None),
         }
@@ -587,6 +592,10 @@ impl<'gc> NetStream<'gc> {
     /// before more is appended.
     const MAX_PLAYED_APPENDED_LEN: usize = 4 << 20;
 
+    /// Above this many bytes, the audio of appended data starts anew from a
+    /// fresh buffer when played data is dropped.
+    const MAX_APPENDED_AUDIO_LEN: usize = 16 << 20;
+
     /// Drops the appended data that has been played, once there is a lot of
     /// it, so that the buffer doesn't grow without bound: content may append
     /// to a stream indefinitely, such as a loop that appends its video again
@@ -603,13 +612,26 @@ impl<'gc> NetStream<'gc> {
             return;
         }
 
-        // The audio stream refers to the buffer, so it starts anew from the
-        // data that is kept, cutting off what the audio backend has buffered.
-        if let Some(instance) = source.sound_instance.take() {
-            context.audio.stop_sound(instance);
-            context.audio_manager.stop_sound(context.audio, instance);
+        // The audio of appended data has a buffer of its own (see
+        // `flv_audio_tag`), so it plays on. That buffer only grows with the
+        // audio, and is replaced whenever the sound restarts. Should it get
+        // large all the same, the sound restarts here, cutting off what the
+        // audio backend has buffered.
+        let audio_len = source
+            .audio_stream
+            .borrow()
+            .as_ref()
+            .map_or(0, |(substream, _)| substream.buffer().len());
+        if audio_len > Self::MAX_APPENDED_AUDIO_LEN {
+            if let Some(instance) = source.sound_instance.take() {
+                context.audio.stop_sound(instance);
+                context.audio_manager.stop_sound(context.audio, instance);
+            }
+            source.audio_stream.replace(None);
         }
-        source.audio_stream.replace(None);
+        source
+            .audio_source_end
+            .set(source.audio_source_end.get().saturating_sub(offset - HEADER_LEN));
 
         let old_buffer = source.buffer.borrow().to_full_slice();
         let mut kept = AppendedFlv::HEADER.to_vec();
@@ -1106,7 +1128,16 @@ impl<'gc> NetStream<'gc> {
             Some(audio_stream) => audio_stream,
             audio_stream => {
                 // None
-                let substream = Substream::new(slice.buffer().clone());
+                // Appended data can be dropped while its audio plays (see
+                // `drop_played_appended_data`), so its audio gets a buffer of
+                // its own.
+                let buffer = if self.0.appending.get() {
+                    Buffer::new()
+                } else {
+                    slice.buffer().clone()
+                };
+                let substream = Substream::new(buffer);
+                source.audio_source_end.set(0);
                 let extra_data = if swf_format.compression == AudioCompression::Aac {
                     source.aac_config.borrow().clone()
                 } else {
@@ -1141,11 +1172,7 @@ impl<'gc> NetStream<'gc> {
             return Ok(());
         }
 
-        if substream
-            .last_chunk()
-            .map(|lc| lc.end() > data.start())
-            .unwrap_or(false)
-        {
+        if source.audio_source_end.get() > data.start() {
             // Reject repeats of existing tags.
             // We need to do this because of lookahead - we will
             // encounter the same audio tag multiple times as we buffer
@@ -1155,7 +1182,16 @@ impl<'gc> NetStream<'gc> {
             // stream before processing new tags.
             return Ok(());
         }
+        source.audio_source_end.set(data.end());
 
+        let data = if substream.buffer() == slice.buffer() {
+            data
+        } else {
+            let mut buffer = substream.buffer().clone();
+            let start = buffer.len();
+            buffer.extend_from_slice(&data.data());
+            buffer.get(start..).expect("appended audio data")
+        };
         Ok(substream.append(data)?)
     }
 
