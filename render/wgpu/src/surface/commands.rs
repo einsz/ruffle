@@ -14,6 +14,7 @@ use ruffle_render::bitmap::{BitmapHandle, PixelRegion, PixelSnapping};
 use ruffle_render::commands::{CommandHandler, CommandList, RenderBlendMode};
 use ruffle_render::lines::{emulate_line, emulate_line_rect};
 use ruffle_render::matrix::Matrix;
+use ruffle_render::matrix3d::Matrix3D;
 use ruffle_render::quality::StageQuality;
 use ruffle_render::transform::Transform;
 use std::mem;
@@ -249,7 +250,7 @@ impl CommandHandler for WgpuCommandHandler<'_, '_> {
             BlendType::Trivial(blend_mode) => {
                 let transform = Transform {
                     matrix: Matrix::scale(target.width() as f32, target.height() as f32),
-                    tz: 0.0,
+                    matrix3d: None,
                     color_transform: Default::default(),
                     perspective_projection: None,
                 };
@@ -323,7 +324,7 @@ impl CommandHandler for WgpuCommandHandler<'_, '_> {
         let texture = as_texture(&bitmap);
 
         pixel_snapping.apply(&mut transform.matrix);
-        transform.matrix *= Matrix::scale(region.width() as f32, region.height() as f32);
+        transform.prepend_scale(region.width() as f32, region.height() as f32);
 
         let binds = texture.bind_group(
             false,
@@ -385,7 +386,7 @@ impl CommandHandler for WgpuCommandHandler<'_, '_> {
     fn render_stage3d(&mut self, bitmap: BitmapHandle, mut transform: Transform) {
         {
             let texture = as_texture(&bitmap);
-            transform.matrix *= Matrix::scale(
+            transform.prepend_scale(
                 texture.texture.width() as f32,
                 texture.texture.height() as f32,
             );
@@ -472,7 +473,21 @@ impl CommandHandler for WgpuCommandHandler<'_, '_> {
         self.add_to_current(
             &Transform {
                 matrix,
-                tz: 0.0,
+                matrix3d: None,
+                color_transform: ColorTransform::multiply_from(color),
+                perspective_projection: None,
+            },
+            &mut None,
+            DrawVertices::PosColorQuad,
+            |draw_offsets| DrawCommand::DrawColor { draw_offsets },
+        );
+    }
+
+    fn draw_rect_3d(&mut self, color: Color, matrix: Matrix, matrix3d: Matrix3D) {
+        self.add_to_current(
+            &Transform {
+                matrix,
+                matrix3d: Some(matrix3d),
                 color_transform: ColorTransform::multiply_from(color),
                 perspective_projection: None,
             },
@@ -493,7 +508,7 @@ impl CommandHandler for WgpuCommandHandler<'_, '_> {
             self.add_to_current(
                 &Transform {
                     matrix,
-                    tz: 0.0,
+                    matrix3d: None,
                     color_transform: ColorTransform::multiply_from(color),
                     perspective_projection: None,
                 },
@@ -515,7 +530,7 @@ impl CommandHandler for WgpuCommandHandler<'_, '_> {
             self.add_to_current(
                 &Transform {
                     matrix,
-                    tz: 0.0,
+                    matrix3d: None,
                     color_transform: ColorTransform::multiply_from(color),
                     perspective_projection: None,
                 },
@@ -615,7 +630,7 @@ impl CommandHandler for WgpuCommandHandler<'_, '_> {
         self.add_to_current(
             &Transform {
                 matrix,
-                tz: 0.0,
+                matrix3d: None,
                 color_transform: Default::default(),
                 perspective_projection: None,
             },
