@@ -370,8 +370,11 @@ pub fn set_x<'gc>(
         let x = args.get_f64(0);
         let old_position = matrix3d_position(dobj);
         dobj.set_x(Twips::from_pixels(x));
-        let x = x - position_offset_x(dobj);
-        dobj.base().set_matrix3d_position(Some(x), None);
+        // Like the 2D position, a non-finite one ends up rounded (to 0).
+        if x.is_finite() {
+            let x = x - position_offset_x(dobj);
+            dobj.base().set_matrix3d_position(Some(x), None);
+        }
         invalidate_parent_if_moved(dobj, old_position);
     }
 
@@ -410,8 +413,11 @@ pub fn set_y<'gc>(
         let y = args.get_f64(0);
         let old_position = matrix3d_position(dobj);
         dobj.set_y(Twips::from_pixels(y));
-        let y = y - position_offset_y(dobj);
-        dobj.base().set_matrix3d_position(None, Some(y));
+        // Like the 2D position, a non-finite one ends up rounded (to 0).
+        if y.is_finite() {
+            let y = y - position_offset_y(dobj);
+            dobj.base().set_matrix3d_position(None, Some(y));
+        }
         invalidate_parent_if_moved(dobj, old_position);
     }
 
