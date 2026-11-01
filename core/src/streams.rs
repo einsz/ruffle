@@ -1069,10 +1069,11 @@ impl<'gc> NetStream<'gc> {
                 (FlvSoundFormat::G711ALawPCM, _)
                 | (FlvSoundFormat::G711MuLawPCM, _)
                 | (FlvSoundFormat::MP38kHz, _) => 8_000,
-                (_, FlvSoundRate::R5_500) => 5_500,
-                (_, FlvSoundRate::R11_000) => 11_000,
-                (_, FlvSoundRate::R22_000) => 22_000,
-                (_, FlvSoundRate::R44_000) => 44_000,
+                // The rates of SWF sound, which FLV's are named after.
+                (_, FlvSoundRate::R5_500) => 5_512,
+                (_, FlvSoundRate::R11_000) => 11_025,
+                (_, FlvSoundRate::R22_000) => 22_050,
+                (_, FlvSoundRate::R44_000) => 44_100,
             },
             is_stereo: match audio_data.sound_type {
                 FlvSoundType::Mono => false,
