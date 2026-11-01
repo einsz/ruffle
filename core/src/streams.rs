@@ -1088,14 +1088,16 @@ impl<'gc> NetStream<'gc> {
     /// Process a parsed FLV audio tag.
     ///
     /// `write` must be an active borrow of the current `NetStream`. `slice`
-    /// must reference the underlying backing buffer.
+    /// must reference the underlying backing buffer. Returns `false` for a
+    /// lookahead tag in another audio format than the current sound: the
+    /// lookahead has to stop there, so that later tags don't play before it.
     fn flv_audio_tag(
         self,
         context: &mut UpdateContext<'gc>,
         slice: &Slice,
         audio_data: FlvAudioData<'_>,
         is_lookahead_tag: bool,
-    ) -> Result<(), NetstreamError> {
+    ) -> Result<bool, NetstreamError> {
         let swf_format = Self::flv_sound_format(&audio_data)?;
         let source = self.source();
         let is_new_format = matches!(
@@ -1107,7 +1109,7 @@ impl<'gc> NetStream<'gc> {
             // format, which needs a decoder of its own. Switch once its first
             // tag is due, so the current sound plays up to it.
             if is_lookahead_tag {
-                return Ok(());
+                return Ok(false);
             }
             if let Some(instance) = source.sound_instance.take() {
                 context.audio.stop_sound(instance);
@@ -1169,7 +1171,7 @@ impl<'gc> NetStream<'gc> {
             let aac_config: Box<[u8]> = (*data.data()).into();
             source.aac_config.replace(Some(aac_config.clone()));
             sound_stream_info.extra_data = Some(aac_config);
-            return Ok(());
+            return Ok(true);
         }
 
         if source.audio_source_end.get() > data.start() {
@@ -1180,7 +1182,7 @@ impl<'gc> NetStream<'gc> {
             // This assumes that tags are processed in-order - which
             // should always be the case. Seeks should cancel the audio
             // stream before processing new tags.
-            return Ok(());
+            return Ok(true);
         }
         source.audio_source_end.set(data.end());
 
@@ -1192,7 +1194,8 @@ impl<'gc> NetStream<'gc> {
             buffer.extend_from_slice(&data.data());
             buffer.get(start..).expect("appended audio data")
         };
-        Ok(substream.append(data)?)
+        substream.append(data)?;
+        Ok(true)
     }
 
     /// Determine if the given sound is currently playing.
@@ -1688,11 +1691,13 @@ impl<'gc> NetStream<'gc> {
                             max_lookahead_audio_tags -= 1;
                         }
 
-                        if let Err(e) =
-                            self.flv_audio_tag(context, &slice, audio_data, is_lookahead_tag)
-                        {
-                            //TODO: Fire an error event at AS.
-                            tracing::error!("Error committing sound stream: {}", e);
+                        match self.flv_audio_tag(context, &slice, audio_data, is_lookahead_tag) {
+                            Ok(true) => {}
+                            Ok(false) => break,
+                            Err(e) => {
+                                //TODO: Fire an error event at AS.
+                                tracing::error!("Error committing sound stream: {}", e);
+                            }
                         }
                     }
                     FlvTagData::Video(video_data) if !is_lookahead_tag => {
