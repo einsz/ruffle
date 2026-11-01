@@ -36,6 +36,14 @@ impl GlowFilter {
         self.blur_y = BlurFilter::scale_blur(self.blur_y, y);
     }
 
+    /// The area that the glow draws to, as in Flash.
+    pub fn calculate_area(&self, source_rect: Rectangle<Twips>) -> Rectangle<Twips> {
+        if self.is_inner() {
+            return source_rect;
+        }
+        self.inner_blur_filter().calculate_area(source_rect)
+    }
+
     pub fn calculate_dest_rect(&self, source_rect: Rectangle<Twips>) -> Rectangle<Twips> {
         // TODO: Inner might not need this. Docs suggest it doesn't care about source rect, but rather source *size*?
         self.inner_blur_filter().calculate_dest_rect(source_rect)
