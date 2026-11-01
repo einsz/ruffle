@@ -188,7 +188,8 @@ impl ShapeTessellator {
 
                     // Larger scales require more precise tessellation to avoid artifacts
                     let tolerance = StrokeToFillOptions::DEFAULT_TOLERANCE / scale;
-                    // Flash draws nothing for subpaths of zero length, whatever their caps.
+                    // Subpaths too short for Flash to draw are left out below;
+                    // lyon would draw the caps of zero length ones otherwise.
                     let mut stroke_options = StrokeToFillOptions::new(width)
                         .with_tolerance(tolerance)
                         .with_empty_caps(false)
@@ -223,8 +224,9 @@ impl ShapeTessellator {
                     // stroke overlaps itself, so convert it to an outline and fill that
                     // with the non-zero rule instead of tessellating the stroke directly.
                     let mut outline = Path::builder();
+                    let path = without_short_subpaths(&lyon_path, MIN_STROKE_LENGTH / scale);
                     self.stroker
-                        .stroke_to_fill(lyon_path.iter(), &stroke_options, &mut outline);
+                        .stroke_to_fill(path.iter(), &stroke_options, &mut outline);
                     self.fill_tess.tessellate_path(
                         &outline.build(),
                         &FillOptions::default()
@@ -465,4 +467,60 @@ impl FillVertexConstructor<Vertex> for RuffleVertexCtor {
             color: self.color,
         }
     }
+}
+
+/// Flash Player draws nothing for a stroked subpath that spans less than about
+/// 3 twips on the screen, whatever its width and caps: measured with straight
+/// lines of 1 to 5 twips and diagonals at scales 0.25, 1 and 4 (2.83 twips
+/// draws nothing, 3 twips draws).
+const MIN_STROKE_LENGTH: f32 = 2.9 / 20.0;
+
+/// The path without the subpaths whose points all lie within `min_length` of
+/// their start (see `MIN_STROKE_LENGTH`), zero length ones included.
+fn without_short_subpaths(path: &Path, min_length: f32) -> Path {
+    use lyon::path::{Event, math::Point};
+
+    let mut builder = Path::builder();
+    let mut subpath: Vec<Event<Point, Point>> = vec![];
+    for event in path.iter() {
+        subpath.push(event);
+        let Event::End { .. } = event else {
+            continue;
+        };
+        let Some(Event::Begin { at: start }) = subpath.first().copied() else {
+            subpath.clear();
+            continue;
+        };
+        let is_short = subpath
+            .iter()
+            .flat_map(|event| match *event {
+                Event::Begin { at } => vec![at],
+                Event::Line { to, .. } => vec![to],
+                Event::Quadratic { ctrl, to, .. } => vec![ctrl, to],
+                Event::Cubic { ctrl1, ctrl2, to, .. } => vec![ctrl1, ctrl2, to],
+                Event::End { .. } => vec![],
+            })
+            .all(|p| (p - start).length() < min_length);
+        for event in subpath.drain(..) {
+            if is_short {
+                continue;
+            }
+            match event {
+                Event::Begin { at } => {
+                    builder.begin(at);
+                }
+                Event::Line { to, .. } => {
+                    builder.line_to(to);
+                }
+                Event::Quadratic { ctrl, to, .. } => {
+                    builder.quadratic_bezier_to(ctrl, to);
+                }
+                Event::Cubic { ctrl1, ctrl2, to, .. } => {
+                    builder.cubic_bezier_to(ctrl1, ctrl2, to);
+                }
+                Event::End { close, .. } => builder.end(close),
+            }
+        }
+    }
+    builder.build()
 }
