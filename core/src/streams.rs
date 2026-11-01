@@ -578,8 +578,47 @@ impl<'gc> NetStream<'gc> {
         if self.0.handling_script_data.get() {
             self.0.pending_append_bytes.borrow_mut().append(&mut tags);
         } else {
+            self.drop_played_appended_data(context);
             self.load_buffer(context, &mut tags);
         }
+    }
+
+    /// Above this many bytes, appended data that has been played is dropped
+    /// before more is appended.
+    const MAX_PLAYED_APPENDED_LEN: usize = 4 << 20;
+
+    /// Drops the appended data that has been played, once there is a lot of
+    /// it, so that the buffer doesn't grow without bound: content may append
+    /// to a stream indefinitely, such as a loop that appends its video again
+    /// and again after `RESET_BEGIN`.
+    fn drop_played_appended_data(self, context: &mut UpdateContext<'gc>) {
+        const HEADER_LEN: usize = AppendedFlv::HEADER.len();
+
+        let source = self.source();
+        let offset = source.offset.get();
+        if !self.0.appending.get()
+            || source.stream_type.borrow().is_none()
+            || offset < HEADER_LEN + Self::MAX_PLAYED_APPENDED_LEN
+        {
+            return;
+        }
+
+        // The audio stream refers to the buffer, so it starts anew from the
+        // data that is kept, cutting off what the audio backend has buffered.
+        if let Some(instance) = source.sound_instance.take() {
+            context.audio.stop_sound(instance);
+            context.audio_manager.stop_sound(context.audio, instance);
+        }
+        source.audio_stream.replace(None);
+
+        let old_buffer = source.buffer.borrow().to_full_slice();
+        let mut kept = AppendedFlv::HEADER.to_vec();
+        kept.extend_from_slice(&old_buffer.data()[offset..]);
+        source.buffer.replace(Buffer::from(kept));
+        source.offset.set(HEADER_LEN);
+        source
+            .preload_offset
+            .set(HEADER_LEN + source.preload_offset.get().saturating_sub(offset));
     }
 
     /// Replaces the buffer with an empty FLV, for appended data.
@@ -1616,6 +1655,7 @@ impl<'gc> NetStream<'gc> {
         let mut pending = std::mem::take(&mut *self.0.pending_append_bytes.borrow_mut());
 
         if !pending.is_empty() {
+            self.drop_played_appended_data(context);
             self.load_buffer(context, &mut pending);
             // A script callback appended more, after the tags just parsed.
             buffer_underrun = false;
