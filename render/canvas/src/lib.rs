@@ -904,15 +904,25 @@ impl CommandHandler for WebCanvasRenderBackend {
 
 /// Convert a series of `DrawCommands` to a `Path2d` shape.
 ///
-/// The path can be optionally closed by setting `is_closed` to `true`.
+/// Subpaths that end where they start are closed. The last subpath can also be
+/// closed by setting `is_closed` to `true`.
 ///
 /// The resulting path is in the shape's own coordinate space and needs to be
 /// transformed to fit within the shape's bounds.
 fn draw_commands_to_path2d(commands: &[DrawCommand], is_closed: bool) -> Path2d {
     let path = Path2d::new().expect("Path2d constructor must succeed");
+    let mut cursor = swf::Point::ZERO;
+    // The start of the current subpath, once it has a segment.
+    let mut start = None;
     for command in commands {
+        if start.is_none() && !matches!(command, DrawCommand::MoveTo(_)) {
+            start = Some(cursor);
+        }
         match command {
             DrawCommand::MoveTo(move_to) => {
+                if start.take() == Some(cursor) {
+                    path.close_path();
+                }
                 path.move_to(move_to.x.get().into(), move_to.y.get().into())
             }
             DrawCommand::LineTo(line_to) => {
@@ -937,9 +947,10 @@ fn draw_commands_to_path2d(commands: &[DrawCommand], is_closed: bool) -> Path2d 
                 anchor.y.get().into(),
             ),
         };
+        cursor = command.end_point();
     }
 
-    if is_closed {
+    if start.is_some_and(|start| is_closed || start == cursor) {
         path.close_path();
     }
 
