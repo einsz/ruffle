@@ -58,7 +58,7 @@ fn get_channel() -> Cow<'static, str> {
     if let Ok(channel) = env::var("CFG_RELEASE_CHANNEL") {
         Cow::Owned(channel)
     } else {
-        Cow::Borrowed("local")
+        Cow::Borrowed("z0r")
     }
 }
 
