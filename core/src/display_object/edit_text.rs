@@ -440,12 +440,15 @@ impl<'gc> EditText<'gc> {
     }
 
     pub fn set_text(self, text: &WStr, context: &mut UpdateContext<'gc>) {
-        if self.text() == text {
+        if self.text() == text && !self.contains_flag(EditTextFlag::DEFAULT_FORMAT_SET) {
             // Note: this check not only prevents text relayout,
             // but it also has observable effects, because text
             // format is not being reset to the default format.
+            // Once the default format has been set, though, Flash
+            // Player applies it even to the same text.
             return;
         }
+        self.set_flag(EditTextFlag::DEFAULT_FORMAT_SET, false);
 
         if self.0.style_sheet.get().is_some() {
             // When CSS is set, text will always be treated as HTML.
@@ -474,6 +477,10 @@ impl<'gc> EditText<'gc> {
     }
 
     pub fn set_html_text(self, text: &WStr, context: &mut UpdateContext<'gc>) {
+        // Setting the HTML text, even to the same value, ends what setting
+        // the default format does to setting the same text.
+        self.set_flag(EditTextFlag::DEFAULT_FORMAT_SET, false);
+
         if self.html_text() == text {
             // Note: this check not only prevents text relayout,
             // but it also has observable effects, because not
@@ -502,6 +509,14 @@ impl<'gc> EditText<'gc> {
 
     pub fn set_new_text_format(self, tf: TextFormat) {
         self.0.text_spans.borrow_mut().set_default_format(tf);
+    }
+
+    /// Sets the default format as `defaultTextFormat` (AVM2) and
+    /// `setNewTextFormat` (AVM1) do: setting the text applies it then even if
+    /// the text stays the same, until the text or HTML text is set.
+    pub fn set_default_text_format(self, tf: TextFormat) {
+        self.set_new_text_format(tf);
+        self.set_flag(EditTextFlag::DEFAULT_FORMAT_SET, true);
     }
 
     pub fn text_format(self, from: usize, to: usize) -> TextFormat {
@@ -3181,6 +3196,9 @@ bitflags::bitflags! {
     struct EditTextFlag: u16 {
         const FIRING_VARIABLE_BINDING = 1 << 0;
         const HAS_BACKGROUND = 1 << 1;
+        /// The default format was set by ActionScript since the text was last
+        /// set, see [`EditText::set_default_text_format`].
+        const DEFAULT_FORMAT_SET = 1 << 2;
         const CONDENSE_WHITE = 1 << 13;
         const ALWAYS_SHOW_SELECTION = 1 << 14;
 
