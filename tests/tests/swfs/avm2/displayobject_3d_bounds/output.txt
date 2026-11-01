@@ -10,3 +10,4 @@ x/y/z after z: 12.345,6.789,5.5
 loaded root pp: fov 55 center 275,200
 in scrollRect, 2D: bounds 120,110,100,100
 in scrollRect, z 0: bounds 120,110,100,100
+stage child: bounds within 2 px of Flash

@@ -90,6 +90,16 @@ package {
             v.x = 100; v.y = 100;
             clip.addChild(v);
 
+            // On the stage, which projects with the focal length of its width
+            // and centre (250, 250). Checked after a render: Flash Player's
+            // bounds before the first one differ.
+            var w:Sprite = new Sprite();
+            w.graphics.beginFill(0x3366cc);
+            w.graphics.drawRect(0, 0, 300, 300);
+            w.graphics.endFill();
+            w.x = 300; w.y = 200; w.rotationY = 60;
+            stage.addChild(w);
+
             var ld:Loader = new Loader();
             ld.contentLoaderInfo.addEventListener(Event.INIT, function(e:Event):void {
                 log("loaded root pp: " + pp(ld.content.transform.perspectiveProjection));
@@ -98,6 +108,7 @@ package {
                     log("in scrollRect, 2D: bounds " + rect(v.getBounds(stage)));
                     v.z = 0;
                     log("in scrollRect, z 0: bounds " + rect(v.getBounds(stage)));
+                    log("stage child: bounds " + near(w.getBounds(stage), [300, 151, 344, 591]));
                 });
             });
             ld.loadBytes(loaderInfo.bytes);
