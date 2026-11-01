@@ -319,7 +319,12 @@ pub fn get_x<'gc>(
     let this = this.as_object().unwrap();
 
     if let Some(dobj) = this.as_display_object() {
-        return Ok(dobj.x().to_pixels().into());
+        // A 3D object's position isn't rounded to twips.
+        return Ok(match dobj.base().matrix3d() {
+            Some(matrix3d) => matrix3d.raw_data[12].into(),
+            None => dobj.x().to_pixels(),
+        }
+        .into());
     }
 
     Ok(Value::Undefined)
@@ -336,6 +341,7 @@ pub fn set_x<'gc>(
     if let Some(dobj) = this.as_display_object() {
         let x = args.get_f64(0);
         dobj.set_x(Twips::from_pixels(x));
+        dobj.base().set_matrix3d_position(Some(x), None);
     }
 
     Ok(Value::Undefined)
@@ -350,7 +356,12 @@ pub fn get_y<'gc>(
     let this = this.as_object().unwrap();
 
     if let Some(dobj) = this.as_display_object() {
-        return Ok(dobj.y().to_pixels().into());
+        // A 3D object's position isn't rounded to twips.
+        return Ok(match dobj.base().matrix3d() {
+            Some(matrix3d) => matrix3d.raw_data[13].into(),
+            None => dobj.y().to_pixels(),
+        }
+        .into());
     }
 
     Ok(Value::Undefined)
@@ -367,6 +378,7 @@ pub fn set_y<'gc>(
     if let Some(dobj) = this.as_display_object() {
         let y = args.get_f64(0);
         dobj.set_y(Twips::from_pixels(y));
+        dobj.base().set_matrix3d_position(None, Some(y));
     }
 
     Ok(Value::Undefined)
@@ -1067,9 +1079,33 @@ fn get_dobj_bounds<'gc>(
         // Calculate the matrix to transform into the target coordinate space, and transform the above AABB.
         // Note that this doesn't produce as tight of an AABB as if we had used `bounds_with_transform` with
         // the final matrix, but this matches Flash's behavior.
-        let to_global_matrix = dobj.local_to_global_matrix();
         let to_target_matrix = target.global_to_local_matrix().unwrap_or_default();
-        to_target_matrix * to_global_matrix * bounds
+        if let Some(to_global_matrix3d) = dobj
+            .local_to_global_matrix3d()
+            .filter(|_| bounds.is_valid())
+        {
+            // A 3D object's bounds are the projection of its local bounds.
+            let corners = [
+                (bounds.x_min, bounds.y_min),
+                (bounds.x_max, bounds.y_min),
+                (bounds.x_min, bounds.y_max),
+                (bounds.x_max, bounds.y_max),
+            ];
+            corners
+                .into_iter()
+                .map(|(x, y)| {
+                    let (x, y) = to_global_matrix3d
+                        .transform_point_2d(x.to_pixels() as f32, y.to_pixels() as f32);
+                    to_target_matrix
+                        * Point::new(Twips::from_pixels(x.into()), Twips::from_pixels(y.into()))
+                })
+                .fold(Rectangle::default(), |bounds, point| {
+                    bounds.encompass(point)
+                })
+        } else {
+            let to_global_matrix = dobj.local_to_global_matrix();
+            to_target_matrix * to_global_matrix * bounds
+        }
     };
     if !out_bounds.is_valid() {
         out_bounds = Rectangle::ZERO;

@@ -21,7 +21,7 @@ use ruffle_macros::{enum_trait_object, istr};
 use ruffle_render::matrix3d::Matrix3D;
 use ruffle_render::perspective_projection::PerspectiveProjection;
 use ruffle_render::pixel_bender::PixelBenderShaderHandle;
-use ruffle_render::transform::Transform;
+use ruffle_render::transform::{Transform, TransformStack};
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -536,6 +536,20 @@ impl<'gc> DisplayObjectBase<'gc> {
         }
         self.set_transformed_by_script(true);
         changed
+    }
+
+    /// Sets the position of a 3D object exactly: unlike a 2D object's, it
+    /// isn't rounded to twips. Does nothing for a 2D object.
+    pub fn set_matrix3d_position(&self, x: Option<f64>, y: Option<f64>) {
+        if let Some(mut matrix3d) = self.matrix3d.get() {
+            if let Some(x) = x {
+                matrix3d.raw_data[12] = x as f32;
+            }
+            if let Some(y) = y {
+                matrix3d.raw_data[13] = y as f32;
+            }
+            self.matrix3d.set(Some(matrix3d));
+        }
     }
 
     fn z(&self) -> f64 {
@@ -1736,6 +1750,44 @@ pub trait TDisplayObject<'gc>:
             matrix = Matrix::translate(-rect.x_min, -rect.y_min) * matrix;
         }
         self.local_to_global_matrix_without_own_scroll_rect() * matrix
+    }
+
+    /// Returns the matrix for transforming from this object's local space to
+    /// global stage space, with the perspective projections that apply to it,
+    /// if it or one of its ancestors is 3D. Use `Matrix3D::transform_point_2d`.
+    #[no_dynamic]
+    fn local_to_global_matrix3d(self) -> Option<Matrix3D> {
+        // Rendering projects 3D objects this way too, from the stage down.
+        let mut ancestors = vec![];
+        let mut stage = None;
+        let mut is_3d = self.base().matrix3d().is_some();
+        let mut node = self.parent();
+        while let Some(display_object) = node {
+            if let Some(found) = display_object.as_stage() {
+                stage = Some(found);
+                break;
+            }
+            is_3d |= display_object.base().matrix3d().is_some();
+            ancestors.push(display_object);
+            node = display_object.parent();
+        }
+        if !is_3d {
+            return None;
+        }
+
+        let mut stack = TransformStack::new();
+        if let Some(stage) = stage {
+            stack.set_stage_width(stage.stage_size().0 as f32);
+            stack.push(&Transform {
+                perspective_projection: stage.render_perspective_projection(),
+                ..Default::default()
+            });
+        }
+        for display_object in ancestors.into_iter().rev() {
+            stack.push(&display_object.base().transform(true));
+        }
+        stack.push(&self.base().transform(true));
+        stack.transform().matrix3d
     }
 
     /// Returns the matrix for transforming from global stage to this object's local space.

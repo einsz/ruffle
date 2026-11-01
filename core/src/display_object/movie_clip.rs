@@ -387,6 +387,13 @@ impl<'gc> MovieClip<'gc> {
 
         write.base.base.reset_for_movie_load();
         write.base.base.set_is_root(is_root);
+        if is_root {
+            // A loaded movie's root has a PerspectiveProjection too.
+            write
+                .base
+                .base
+                .set_perspective_projection(Some(default_root_perspective_projection(movie)));
+        }
 
         unlock!(write, MovieClipData, cell).borrow_mut().container = ChildContainer::new(&movie);
 
@@ -2774,13 +2781,7 @@ impl<'gc> TDisplayObject<'gc> for MovieClip<'gc> {
     fn set_perspective_projection(self, mut perspective_projection: Option<PerspectiveProjection>) {
         if perspective_projection.is_none() && self.is_root() {
             // `root` doesn't allow null PerspectiveProjection.
-            perspective_projection = Some(PerspectiveProjection {
-                field_of_view: 55.0,
-                center: (
-                    self.movie().width().to_pixels() / 2.0,
-                    self.movie().height().to_pixels() / 2.0,
-                ),
-            });
+            perspective_projection = Some(default_root_perspective_projection(self.movie()));
         }
 
         if self
@@ -5088,5 +5089,16 @@ impl ClipEventHandler {
             key_code,
             action_data: SwfSlice::from(movie).to_subslice(swf_action.action_data),
         }
+    }
+}
+
+/// The PerspectiveProjection a root starts with: centered on its movie's stage.
+fn default_root_perspective_projection(movie: SwfMovie<'_>) -> PerspectiveProjection {
+    PerspectiveProjection {
+        field_of_view: 55.0,
+        center: (
+            movie.width().to_pixels() / 2.0,
+            movie.height().to_pixels() / 2.0,
+        ),
     }
 }

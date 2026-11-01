@@ -255,6 +255,17 @@ impl Matrix3D {
         Some(Self { raw_data })
     }
 
+    /// Transforms the point (x, y, 0), dividing by the resulting w, as a
+    /// perspective projection needs.
+    pub fn transform_point_2d(&self, x: f32, y: f32) -> (f32, f32) {
+        let m = &self.raw_data;
+        let w = m[3] * x + m[7] * y + m[15];
+        (
+            (m[0] * x + m[4] * y + m[12]) / w,
+            (m[1] * x + m[5] * y + m[13]) / w,
+        )
+    }
+
     pub fn multiply(&self, rhs: &Self) -> Self {
         let lhs = &self.raw_data;
         let rhs = &rhs.raw_data;
