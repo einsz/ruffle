@@ -1515,19 +1515,19 @@ impl<'gc> NetStream<'gc> {
         let mut frame_rate = None;
         let mut duration = None;
 
-        for var in script_data.0 {
+        for var in &script_data.0 {
             if var.name == b"onMetaData" {
-                match var.data.clone() {
+                match &var.data {
                     FlvValue::Object(subvars) | FlvValue::EcmaArray(subvars) => {
                         for subvar in subvars {
-                            match (subvar.name, subvar.data) {
-                                (b"width", FlvValue::Number(val)) => width = Some(val),
-                                (b"height", FlvValue::Number(val)) => height = Some(val),
+                            match (subvar.name, &subvar.data) {
+                                (b"width", FlvValue::Number(val)) => width = Some(*val),
+                                (b"height", FlvValue::Number(val)) => height = Some(*val),
                                 (b"videocodecid", FlvValue::Number(val)) => {
-                                    video_codec_id = Some(val)
+                                    video_codec_id = Some(*val)
                                 }
-                                (b"framerate", FlvValue::Number(val)) => frame_rate = Some(val),
-                                (b"duration", FlvValue::Number(val)) => duration = Some(val),
+                                (b"framerate", FlvValue::Number(val)) => frame_rate = Some(*val),
+                                (b"duration", FlvValue::Number(val)) => duration = Some(*val),
                                 _ => {}
                             }
                         }
@@ -1535,16 +1535,10 @@ impl<'gc> NetStream<'gc> {
                     _ => tracing::error!("Invalid FLV metadata tag!"),
                 }
             }
-            let avm_object = self.0.avm_object.get();
-            // This is necessary because the script callback functions can call back into
-            // these methods, (e.g. NetStream::play), so we need to avoid holding a borrow
-            // while the script data is being handled.
-            self.0.handling_script_data.set(true);
-            let _ = self.handle_script_data(avm_object, context, var.name, var.data);
-            self.0.handling_script_data.set(false);
-            // Any errors while trying to lookup or call AVM2 properties are silently swallowed.
         }
 
+        // Before the script callbacks: one may seek in data generation mode,
+        // which carries the video stream over to the data appended next.
         if tag_needs_preloading
             && let (
                 Some(width),
@@ -1555,21 +1549,33 @@ impl<'gc> NetStream<'gc> {
             ) = (width, height, video_codec_id, frame_rate, duration)
         {
             let num_frames = frame_rate * duration;
-            if let Some(video_codec) = VideoCodec::from_u8(video_codec_id as u8) {
-                if Some(video_codec) == stream_codec {
-                    // Keep the stream, e.g. for a file appended again.
-                    return;
+            match VideoCodec::from_u8(video_codec_id as u8) {
+                // Keep the stream, e.g. for a file appended again.
+                Some(video_codec) if Some(video_codec) == stream_codec => {}
+                Some(video_codec) => {
+                    Self::register_video_stream(
+                        &source,
+                        context,
+                        num_frames as u32,
+                        (width as u16, height as u16),
+                        video_codec,
+                    );
                 }
-                Self::register_video_stream(
-                    &source,
-                    context,
-                    num_frames as u32,
-                    (width as u16, height as u16),
-                    video_codec,
-                );
-            } else {
-                tracing::error!("FLV video stream has invalid codec ID {}", video_codec_id);
+                None => {
+                    tracing::error!("FLV video stream has invalid codec ID {}", video_codec_id)
+                }
             }
+        }
+
+        for var in script_data.0 {
+            let avm_object = self.0.avm_object.get();
+            // This is necessary because the script callback functions can call back into
+            // these methods, (e.g. NetStream::play), so we need to avoid holding a borrow
+            // while the script data is being handled.
+            self.0.handling_script_data.set(true);
+            let _ = self.handle_script_data(avm_object, context, var.name, var.data);
+            self.0.handling_script_data.set(false);
+            // Any errors while trying to lookup or call AVM2 properties are silently swallowed.
         }
     }
 
