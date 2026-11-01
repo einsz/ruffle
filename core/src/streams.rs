@@ -1212,6 +1212,12 @@ impl<'gc> NetStream<'gc> {
         let seek_offset = source.queued_seek_time.take();
         if let Some(offset) = seek_offset {
             self.execute_seek(context, offset);
+
+            // A seek status handler can close the stream or play another one,
+            // which replaces the source: leave the new one to the next tick.
+            if !Gc::ptr_eq(source, self.source()) {
+                return;
+            }
         }
 
         // Paused streams deactivate themselves after seek processing.
