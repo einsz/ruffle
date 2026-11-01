@@ -1579,7 +1579,9 @@ pub fn load_netstream<'gc>(
 
                 loop {
                     let chunk = response.next_chunk().await;
-                    let is_end = matches!(chunk, Ok(None));
+                    // A read error ends the download too: the response won't recover,
+                    // and asking it again would spin forever.
+                    let is_end = !matches!(chunk, Ok(Some(_)));
                     let is_current =
                         player.lock().unwrap().update(|uc| -> Result<bool, Error> {
                             let stream = stream.fetch(uc);
