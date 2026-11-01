@@ -112,7 +112,10 @@ pub fn calculate_shape_bounds(shape_records: &[swf::ShapeRecord]) -> swf::Rectan
 
 /// `DrawPath` represents a solid fill or a stroke.
 /// Fills are always closed paths, while strokes may be open or closed.
-/// Closed paths will have the first point equal to the last point.
+/// A subpath of a stroke is closed if its last point equals its first point, or if it's the
+/// last subpath and `is_closed` is set.
+///
+/// A stroke covers its area once, even where its subpaths overlap.
 #[derive(Clone, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum DrawPath<'a> {
@@ -242,10 +245,6 @@ impl PathSegment {
 
     fn end(&self) -> Option<swf::Point<Twips>> {
         Some((*self.points.last()?).into())
-    }
-
-    fn is_closed(&self) -> bool {
-        self.start() == self.end()
     }
 
     fn to_draw_commands(&self) -> impl '_ + Iterator<Item = DrawCommand> {
@@ -555,21 +554,19 @@ impl<'a> ShapeConverter<'a> {
         }
 
         // Strokes are drawn last because they always appear on top of fills in the same layer.
-        // Because path segments can either be open or closed, we convert each stroke segment into
-        // a separate draw command.
+        // Flash draws all segments of a line style as one stroke, so where they overlap, the
+        // overlap is drawn once.
         for (i, path) in self.strokes.iter_mut().enumerate() {
             debug_assert!(i < self.line_styles.len());
-            let style = unsafe { self.line_styles.get_unchecked(i) };
-            for segment in &path.segments {
-                if segment.is_empty() {
-                    continue;
-                }
-                self.commands.push(DrawPath::Stroke {
-                    style,
-                    is_closed: segment.is_closed(),
-                    commands: segment.to_draw_commands().collect(),
-                });
+            if path.segments.is_empty() {
+                continue;
             }
+            let style = unsafe { self.line_styles.get_unchecked(i) };
+            self.commands.push(DrawPath::Stroke {
+                style,
+                is_closed: false,
+                commands: path.to_draw_commands().collect(),
+            });
             path.segments.clear();
         }
     }

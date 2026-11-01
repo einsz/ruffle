@@ -206,3 +206,11 @@ lto = "off"
 incremental = true
 # Right between the defaults of 16 and 256, for crate fragment caching.
 codegen-units = 64
+
+# Stroke-to-fill conversion (nical/lyon#982) is not released yet.
+[patch.crates-io]
+lyon = { git = "https://github.com/nical/lyon", rev = "3c1f005" }
+lyon_algorithms = { git = "https://github.com/nical/lyon", rev = "3c1f005" }
+lyon_geom = { git = "https://github.com/nical/lyon", rev = "3c1f005" }
+lyon_path = { git = "https://github.com/nical/lyon", rev = "3c1f005" }
+lyon_tessellation = { git = "https://github.com/nical/lyon", rev = "3c1f005" }
