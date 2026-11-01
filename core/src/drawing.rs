@@ -258,11 +258,7 @@ impl Drawing {
                         });
                     }
                     DrawingPath::Line(line) => {
-                        paths.push(DrawPath::Stroke {
-                            style: &line.style,
-                            commands: line.commands.to_owned(),
-                            is_closed: line.is_closed,
-                        });
+                        push_stroke(&mut paths, &line.style, &line.commands, line.is_closed);
                     }
                 }
             }
@@ -283,11 +279,7 @@ impl Drawing {
                 } else {
                     self.cursor == self.fill_start
                 };
-                paths.push(DrawPath::Stroke {
-                    style: &line.style,
-                    commands,
-                    is_closed,
-                })
+                push_stroke(&mut paths, &line.style, &commands, is_closed);
             }
 
             if let Some(line) = &self.current_line {
@@ -298,11 +290,7 @@ impl Drawing {
                 } else {
                     self.cursor == self.fill_start
                 };
-                paths.push(DrawPath::Stroke {
-                    style: &line.style,
-                    commands,
-                    is_closed,
-                })
+                push_stroke(&mut paths, &line.style, &commands, is_closed);
             }
 
             let shape = DistilledShape {
@@ -430,6 +418,30 @@ impl BitmapSource for Drawing {
     }
     fn bitmap_handle(&self, id: u16, _backend: &mut dyn RenderBackend) -> Option<BitmapHandle> {
         self.bitmaps.get(id as usize).map(|bm| bm.handle.clone())
+    }
+}
+
+/// Adds a line to `paths`, one stroke per subpath. Unlike in shapes from SWF tags, Flash draws
+/// each subpath of a drawing separately, so where they overlap, the overlap is drawn twice.
+fn push_stroke<'a>(
+    paths: &mut Vec<DrawPath<'a>>,
+    style: &'a LineStyle,
+    commands: &[DrawCommand],
+    is_closed: bool,
+) {
+    let mut subpaths = commands
+        .chunk_by(|_, b| !matches!(b, DrawCommand::MoveTo(_)))
+        .peekable();
+    while let Some(subpath) = subpaths.next() {
+        let is_last = subpaths.peek().is_none();
+        if let [DrawCommand::MoveTo(_)] = subpath {
+            continue;
+        }
+        paths.push(DrawPath::Stroke {
+            style,
+            commands: subpath.to_owned(),
+            is_closed: is_closed && is_last,
+        });
     }
 }
 
