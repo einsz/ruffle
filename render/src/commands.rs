@@ -1,6 +1,7 @@
 use crate::backend::ShapeHandle;
 use crate::bitmap::{BitmapHandle, PixelRegion, PixelSnapping};
 use crate::matrix::Matrix;
+use crate::matrix3d::Matrix3D;
 use crate::pixel_bender::PixelBenderShaderHandle;
 use crate::transform::Transform;
 use swf::{BlendMode, Color};
@@ -18,6 +19,12 @@ pub trait CommandHandler {
     fn render_shape(&mut self, shape: ShapeHandle, transform: Transform);
     fn render_alpha_mask(&mut self, maskee_commands: CommandList, mask_commands: CommandList);
     fn draw_rect(&mut self, color: Color, matrix: Matrix);
+    /// Draws a rectangle with a 3D matrix (see `Transform::matrix3d`).
+    /// Backends that don't render 3D draw it with its 2D `matrix`.
+    fn draw_rect_3d(&mut self, color: Color, matrix: Matrix, matrix3d: Matrix3D) {
+        let _ = matrix3d;
+        self.draw_rect(color, matrix);
+    }
     fn draw_line(&mut self, color: Color, matrix: Matrix);
     fn draw_line_rect(&mut self, color: Color, matrix: Matrix);
     fn push_mask(&mut self);
@@ -74,6 +81,11 @@ impl CommandList {
                     handler.render_stage3d(bitmap, transform)
                 }
                 Command::DrawRect { color, matrix } => handler.draw_rect(color, matrix),
+                Command::DrawRect3D {
+                    color,
+                    matrix,
+                    matrix3d,
+                } => handler.draw_rect_3d(color, matrix, matrix3d),
                 Command::DrawLine { color, matrix } => handler.draw_line(color, matrix),
                 Command::DrawLineRect { color, matrix } => handler.draw_line_rect(color, matrix),
                 Command::PushMask => handler.push_mask(),
@@ -144,6 +156,17 @@ impl CommandHandler for CommandList {
     fn draw_rect(&mut self, color: Color, matrix: Matrix) {
         if self.maskers_in_progress <= 1 {
             self.commands.push(Command::DrawRect { color, matrix });
+        }
+    }
+
+    #[inline]
+    fn draw_rect_3d(&mut self, color: Color, matrix: Matrix, matrix3d: Matrix3D) {
+        if self.maskers_in_progress <= 1 {
+            self.commands.push(Command::DrawRect3D {
+                color,
+                matrix,
+                matrix3d,
+            });
         }
     }
 
@@ -225,6 +248,11 @@ pub enum Command {
     DrawRect {
         color: Color,
         matrix: Matrix,
+    },
+    DrawRect3D {
+        color: Color,
+        matrix: Matrix,
+        matrix3d: Matrix3D,
     },
     DrawLine {
         color: Color,

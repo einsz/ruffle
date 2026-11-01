@@ -501,18 +501,23 @@ impl<'gc> TDisplayObject<'gc> for Video<'gc> {
     }
 
     fn render_with_options(self, context: &mut RenderContext<'_, 'gc>, options: RenderOptions) {
+        if options.apply_transform {
+            let transform = self.base().transform(options.apply_matrix);
+            context.transform_stack.push(&transform);
+        }
+
         if !context.is_offscreen
+            // The bounds of 3D objects are not projected yet.
+            && !context.transform_stack.is_3d()
             && !self
                 .world_bounds(BoundsMode::Engine)
                 .intersects(&context.stage.view_bounds())
         {
             // Off-screen; culled
+            if options.apply_transform {
+                context.transform_stack.pop();
+            }
             return;
-        }
-
-        if options.apply_transform {
-            let transform = self.base().transform(options.apply_matrix);
-            context.transform_stack.push(&transform);
         }
 
         let mut transform = context.transform_stack.transform();
@@ -548,7 +553,7 @@ impl<'gc> TDisplayObject<'gc> for Video<'gc> {
         if let Some(bitmap) = decoded_frame {
             // The actual decoded frames might be different in size than the declared
             // bounds of the VideoStream tag, so a final scale adjustment has to be done.
-            transform.matrix *= Matrix::scale(
+            transform.prepend_scale(
                 bounds.width().to_pixels() as f32 / bitmap.width as f32,
                 bounds.height().to_pixels() as f32 / bitmap.height as f32,
             );
