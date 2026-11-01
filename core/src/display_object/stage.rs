@@ -621,12 +621,27 @@ impl<'gc> Stage<'gc> {
     /// You can easily observe the difference between render_viewport and render
     /// in FP by checking which stuff can be rendered using `BitmapData.draw`.
     pub fn render_viewport(self, context: &mut RenderContext<'_, 'gc>) {
+        let stage_width = self.stage_size().0 as f64;
+        context.transform_stack.set_stage_width(stage_width as f32);
+        // The stage's own perspective projection has the focal length of a
+        // 500 pixel wide stage, whatever the stage's size.
+        let perspective_projection =
+            self.as_displayobject()
+                .base()
+                .perspective_projection()
+                .map(|pp| PerspectiveProjection {
+                    field_of_view: PerspectiveProjection::from_focal_length(
+                        pp.focal_length(500.0).into(),
+                        stage_width,
+                    )
+                    .field_of_view,
+                    ..pp
+                });
         context.transform_stack.push(&Transform {
             matrix: self.0.viewport_matrix.get(),
             color_transform: Default::default(),
-            // TODO: Verify perspective_projection when its rendering is implemented.
-            perspective_projection: self.as_displayobject().base().perspective_projection(),
-            tz: 0.0,
+            perspective_projection,
+            matrix3d: None,
         });
 
         // All of our Stage3D instances get rendered *underneath* the main stage.

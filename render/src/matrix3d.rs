@@ -67,6 +67,78 @@ impl Matrix3D {
         }
     }
 
+    /// A rotation about the X, then the Y, then the Z axis, in radians.
+    pub fn euler_rotation(x: f64, y: f64, z: f64) -> Self {
+        let (sx, cx) = x.sin_cos();
+        let (sy, cy) = y.sin_cos();
+        let (sz, cz) = z.sin_cos();
+        Self {
+            #[rustfmt::skip]
+            raw_data: [
+                cy * cz, cy * sz, -sy, 0.0,
+                sx * sy * cz - cx * sz, sx * sy * sz + cx * cz, sx * cy, 0.0,
+                cx * sy * cz + sx * sz, cx * sy * sz - sx * cz, cx * cy, 0.0,
+                0.0, 0.0, 0.0, 1.0,
+            ]
+            .map(|f| f as f32),
+        }
+    }
+
+    /// Splits the linear part of this matrix into a rotation (as used by
+    /// `euler_rotation`) and a scale, as display objects do.
+    ///
+    /// Unlike `Matrix3D.decompose`, this orthogonalizes the axes, so a skew
+    /// shows up as a smaller scale rather than a longer axis.
+    pub fn decompose_rotation_scale(&self) -> ([f64; 3], [f64; 3]) {
+        fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+            a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+        }
+        fn sub_projection(a: [f64; 3], unit: [f64; 3]) -> [f64; 3] {
+            let d = dot(a, unit);
+            [a[0] - d * unit[0], a[1] - d * unit[1], a[2] - d * unit[2]]
+        }
+        fn normalize(a: [f64; 3]) -> (f64, [f64; 3]) {
+            let length = dot(a, a).sqrt();
+            if length == 0.0 {
+                (0.0, a)
+            } else {
+                (length, a.map(|f| f / length))
+            }
+        }
+
+        let m = self.raw_data.map(f64::from);
+        let x_axis = [m[0], m[1], m[2]];
+        let y_axis = [m[4], m[5], m[6]];
+        let z_axis = [m[8], m[9], m[10]];
+
+        let (scale_x, x_unit) = normalize(x_axis);
+        let (scale_y, y_unit) = normalize(sub_projection(y_axis, x_unit));
+        let (mut scale_z, mut z_unit) =
+            normalize(sub_projection(sub_projection(z_axis, x_unit), y_unit));
+
+        let determinant = x_axis[0] * (y_axis[1] * z_axis[2] - y_axis[2] * z_axis[1])
+            - x_axis[1] * (y_axis[0] * z_axis[2] - y_axis[2] * z_axis[0])
+            + x_axis[2] * (y_axis[0] * z_axis[1] - y_axis[1] * z_axis[0]);
+        if determinant < 0.0 {
+            scale_z = -scale_z;
+            z_unit = z_unit.map(|f| -f);
+        }
+
+        let rotation_y = (-x_unit[2]).clamp(-1.0, 1.0).asin();
+        let (rotation_x, rotation_z) = if x_unit[2].abs() < 1.0 {
+            (y_unit[2].atan2(z_unit[2]), x_unit[1].atan2(x_unit[0]))
+        } else {
+            // Gimbal lock: rotationY is 90 or -90 degrees, which flips the
+            // sign of rotationX in the Y axis.
+            ((-x_unit[2] * y_unit[0]).atan2(y_unit[1]), 0.0)
+        };
+
+        (
+            [rotation_x, rotation_y, rotation_z],
+            [scale_x, scale_y, scale_z],
+        )
+    }
+
     pub fn to_matrix(self) -> Matrix {
         Matrix {
             a: self.raw_data[0],
