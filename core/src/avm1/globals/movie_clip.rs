@@ -326,7 +326,15 @@ fn line_style<'gc>(
     args: &[Value<'gc>],
 ) -> Result<Value<'gc>, Error<'gc>> {
     if let Some(width) = args.get(0) {
-        let width = Twips::from_pixels(width.coerce_to_f64(activation)?.clamp(0.0, 255.0));
+        // As in Flash Player, the thickness is truncated to an integer, and
+        // one out of the 32-bit range (including NaN and infinities) is 0.
+        let width = width.coerce_to_f64(activation)?;
+        let width = if (-2_147_483_648.0..2_147_483_648.0).contains(&width) {
+            width.trunc()
+        } else {
+            0.0
+        };
+        let width = Twips::from_pixels(width.clamp(0.0, 255.0));
         let color = if let Some(rgb) = args.get(1) {
             let rgb = rgb.coerce_to_u32(activation)?;
             let alpha = if let Some(alpha) = args.get(2) {
