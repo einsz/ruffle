@@ -22,3 +22,17 @@ FLASH_PLAYERS_TEST_CONFIG = { value = ".flash_players.toml", relative = true }
 [alias]
 testutils = "run --package tests --"
 fuzzer = "run --package ruffle_fuzzer --"
+
+# z0r fork only (see einsz/ruffle branch z0r-deps): dependency fixes that are
+# not released upstream. Cargo merges these with any [patch] in Cargo.toml.
+
+# Substitute zero for an invalid Huffman code and go on, like libjpeg and
+# Flash, instead of failing to decode the whole JPEG.
+[patch.crates-io]
+jpeg-decoder = { git = "https://github.com/einsz/jpeg-decoder", rev = "c7f37aeda1b8aa6b0fc6422fc35fde7151d8b873" }
+
+# End a picture with its last macroblock (Sorenson streams padded with a
+# zero byte), ruffle-rs/h263-rs.
+[patch."https://github.com/ruffle-rs/h263-rs"]
+h263-rs = { git = "https://github.com/einsz/h263-rs", rev = "caa4ad5ef421d0f8c5c786be577e5f93813d95ea" }
+h263-rs-deblock = { git = "https://github.com/einsz/h263-rs", rev = "caa4ad5ef421d0f8c5c786be577e5f93813d95ea" }
