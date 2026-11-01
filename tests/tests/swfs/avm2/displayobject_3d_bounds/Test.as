@@ -10,7 +10,8 @@ package {
     // x and y aren't rounded to twips, and a loaded movie's root has a
     // PerspectiveProjection. Flash Player's bounds are a little larger than
     // the projected corners (by up to about a pixel, apparently from how it
-    // renders 3D objects), so they are compared with a tolerance.
+    // renders 3D objects), so they are compared with a tolerance. An
+    // ancestor's scrollRect offsets 3D objects as it does 2D ones.
     [SWF(width="550", height="400", frameRate="24")]
     public class Test extends MovieClip {
         private function log(s:String):void { trace(s); }
@@ -79,9 +80,25 @@ package {
             u.z = 5.5;
             log("x/y/z after z: " + r(u.x) + "," + r(u.y) + "," + r(u.z));
 
+            // Inside a scrolled scrollRect, checked a frame later (the
+            // scrollRect applies once rendered).
+            var clip:Sprite = new Sprite();
+            clip.x = 50; clip.y = 20;
+            clip.scrollRect = new Rectangle(30, 10, 300, 300);
+            addChild(clip);
+            var v:Sprite = square();
+            v.x = 100; v.y = 100;
+            clip.addChild(v);
+
             var ld:Loader = new Loader();
             ld.contentLoaderInfo.addEventListener(Event.INIT, function(e:Event):void {
                 log("loaded root pp: " + pp(ld.content.transform.perspectiveProjection));
+                addEventListener(Event.ENTER_FRAME, function next(e:Event):void {
+                    removeEventListener(Event.ENTER_FRAME, next);
+                    log("in scrollRect, 2D: bounds " + rect(v.getBounds(stage)));
+                    v.z = 0;
+                    log("in scrollRect, z 0: bounds " + rect(v.getBounds(stage)));
+                });
             });
             ld.loadBytes(loaderInfo.bytes);
         }
