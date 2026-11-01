@@ -2360,7 +2360,7 @@ dependencies = [
 [[package]]
 name = "h263-rs"
 version = "0.1.0"
-source = "git+https://github.com/ruffle-rs/h263-rs?rev=27ee833ca97aadd2a14cf0b3b4ec8b53f31ff6bd#27ee833ca97aadd2a14cf0b3b4ec8b53f31ff6bd"
+source = "git+https://github.com/einsz/h263-rs?rev=caa4ad5ef421d0f8c5c786be577e5f93813d95ea#caa4ad5ef421d0f8c5c786be577e5f93813d95ea"
 dependencies = [
  "bitflags 2.13.2",
  "num-traits",
@@ -2370,7 +2370,7 @@ dependencies = [
 [[package]]
 name = "h263-rs-deblock"
 version = "0.1.0"
-source = "git+https://github.com/ruffle-rs/h263-rs?rev=27ee833ca97aadd2a14cf0b3b4ec8b53f31ff6bd#27ee833ca97aadd2a14cf0b3b4ec8b53f31ff6bd"
+source = "git+https://github.com/einsz/h263-rs?rev=caa4ad5ef421d0f8c5c786be577e5f93813d95ea#caa4ad5ef421d0f8c5c786be577e5f93813d95ea"
 dependencies = [
  "itertools 0.15.0",
  "wide",
@@ -2884,8 +2884,7 @@ dependencies = [
 [[package]]
 name = "jpeg-decoder"
 version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00810f1d8b74be64b13dbf3db89ac67740615d6c891f0e7b6179326533011a07"
+source = "git+https://github.com/einsz/jpeg-decoder?rev=c7f37aeda1b8aa6b0fc6422fc35fde7151d8b873#c7f37aeda1b8aa6b0fc6422fc35fde7151d8b873"
 
 [[package]]
 name = "jpegxr"
