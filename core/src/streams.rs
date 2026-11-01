@@ -1286,6 +1286,13 @@ impl<'gc> NetStream<'gc> {
                     }
                     FlvTagData::Script(script_data) if !is_lookahead_tag => {
                         self.flv_script_tag(context, script_data, tag_needs_preloading);
+
+                        // A callback such as onMetaData can close the stream
+                        // or play another one, which replaces the source:
+                        // what is left of the old buffer must not play.
+                        if !Gc::ptr_eq(source, self.source()) {
+                            return;
+                        }
                     }
                     FlvTagData::Invalid(e) => {
                         tracing::error!("FLV data parsing failed: {}", e)
