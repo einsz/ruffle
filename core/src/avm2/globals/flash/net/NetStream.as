@@ -35,9 +35,7 @@ package flash.net {
             stub_method("flash.net.NetStream", "attachCamera");
         }
 
-        public function close() {
-            stub_method("flash.net.NetStream", "close");
-        }
+        public native function close():void;
 
         [API("674")]
         public function dispose() {
