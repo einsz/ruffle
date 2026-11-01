@@ -92,8 +92,25 @@ impl Filter {
             Filter::GlowFilter(filter) => filter.calculate_dest_rect(source_rect),
             Filter::DropShadowFilter(filter) => filter.calculate_dest_rect(source_rect),
             Filter::BevelFilter(filter) => filter.calculate_dest_rect(source_rect),
+            Filter::GradientGlowFilter(filter) => filter.calculate_dest_rect(source_rect),
+            Filter::GradientBevelFilter(filter) => filter.calculate_dest_rect(source_rect),
             Filter::DisplacementMapFilter(filter) => filter.calculate_dest_rect(source_rect),
             _ => source_rect,
+        }
+    }
+
+    /// The area that this filter draws to, given the area of its source, as
+    /// in Flash. Unlike `calculate_dest_rect`, this leaves out any room that
+    /// the filter needs but leaves transparent.
+    pub fn calculate_area(&self, source_rect: Rectangle<Twips>) -> Rectangle<Twips> {
+        match self {
+            Filter::BlurFilter(filter) => filter.calculate_area(source_rect),
+            Filter::GlowFilter(filter) => filter.calculate_area(source_rect),
+            Filter::DropShadowFilter(filter) => filter.calculate_area(source_rect),
+            Filter::BevelFilter(filter) => filter.calculate_area(source_rect),
+            Filter::GradientGlowFilter(filter) => filter.calculate_glow_area(source_rect),
+            Filter::GradientBevelFilter(filter) => filter.calculate_bevel_area(source_rect),
+            _ => self.calculate_dest_rect(source_rect),
         }
     }
 
