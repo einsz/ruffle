@@ -321,13 +321,24 @@ pub fn get_x<'gc>(
     if let Some(dobj) = this.as_display_object() {
         // A 3D object's position isn't rounded to twips.
         return Ok(match dobj.base().matrix3d() {
-            Some(matrix3d) => matrix3d.raw_data[12].into(),
+            Some(matrix3d) => f64::from(matrix3d.raw_data[12]) + position_offset_x(dobj),
             None => dobj.x().to_pixels(),
         }
         .into());
     }
 
     Ok(Value::Undefined)
+}
+
+/// How far `x` is from the object's matrix: a text field's `x` is where its
+/// bounds start (see `EditText::bounds_x_offset`).
+fn position_offset_x(dobj: DisplayObject<'_>) -> f64 {
+    (dobj.x() - dobj.base().matrix().tx).to_pixels()
+}
+
+/// How far `y` is from the object's matrix, see `position_offset_x`.
+fn position_offset_y(dobj: DisplayObject<'_>) -> f64 {
+    (dobj.y() - dobj.base().matrix().ty).to_pixels()
 }
 
 /// The exact position of a 3D object, which `x` and `y` set unrounded.
@@ -359,6 +370,7 @@ pub fn set_x<'gc>(
         let x = args.get_f64(0);
         let old_position = matrix3d_position(dobj);
         dobj.set_x(Twips::from_pixels(x));
+        let x = x - position_offset_x(dobj);
         dobj.base().set_matrix3d_position(Some(x), None);
         invalidate_parent_if_moved(dobj, old_position);
     }
@@ -377,7 +389,7 @@ pub fn get_y<'gc>(
     if let Some(dobj) = this.as_display_object() {
         // A 3D object's position isn't rounded to twips.
         return Ok(match dobj.base().matrix3d() {
-            Some(matrix3d) => matrix3d.raw_data[13].into(),
+            Some(matrix3d) => f64::from(matrix3d.raw_data[13]) + position_offset_y(dobj),
             None => dobj.y().to_pixels(),
         }
         .into());
@@ -398,6 +410,7 @@ pub fn set_y<'gc>(
         let y = args.get_f64(0);
         let old_position = matrix3d_position(dobj);
         dobj.set_y(Twips::from_pixels(y));
+        let y = y - position_offset_y(dobj);
         dobj.base().set_matrix3d_position(None, Some(y));
         invalidate_parent_if_moved(dobj, old_position);
     }
