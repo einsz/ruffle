@@ -397,25 +397,25 @@ fn ruffle_path_to_lyon_path(commands: &[DrawCommand], is_closed: bool) -> Path {
     }
 
     let mut builder = Path::builder();
-    let mut cursor = Some(swf::Point::ZERO);
+    let mut cursor = swf::Point::ZERO;
+    // The start of the current subpath, once it has a segment.
+    let mut start = None;
     for command in commands {
+        if start.is_none() && !matches!(command, DrawCommand::MoveTo(_)) {
+            builder.begin(point(cursor));
+            start = Some(cursor);
+        }
         match command {
-            DrawCommand::MoveTo(move_to) => {
-                if cursor.is_none() {
-                    builder.end(false);
+            DrawCommand::MoveTo(_) => {
+                if let Some(start) = start.take() {
+                    // As in Flash, a subpath that ends where it starts is closed.
+                    builder.end(start == cursor);
                 }
-                cursor = Some(*move_to);
             }
             DrawCommand::LineTo(line_to) => {
-                if let Some(cursor) = cursor.take() {
-                    builder.begin(point(cursor));
-                }
                 builder.line_to(point(*line_to));
             }
             DrawCommand::QuadraticCurveTo { control, anchor } => {
-                if let Some(cursor) = cursor.take() {
-                    builder.begin(point(cursor));
-                }
                 builder.quadratic_bezier_to(point(*control), point(*anchor));
             }
             DrawCommand::CubicCurveTo {
@@ -423,20 +423,14 @@ fn ruffle_path_to_lyon_path(commands: &[DrawCommand], is_closed: bool) -> Path {
                 control_b,
                 anchor,
             } => {
-                if let Some(cursor) = cursor.take() {
-                    builder.begin(point(cursor));
-                }
                 builder.cubic_bezier_to(point(*control_a), point(*control_b), point(*anchor));
             }
         }
+        cursor = command.end_point();
     }
 
-    if cursor.is_none() {
-        if is_closed {
-            builder.close();
-        } else {
-            builder.end(false);
-        }
+    if let Some(start) = start {
+        builder.end(is_closed || start == cursor);
     }
 
     builder.build()
