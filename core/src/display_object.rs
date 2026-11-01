@@ -1783,10 +1783,17 @@ pub trait TDisplayObject<'gc>:
                 ..Default::default()
             });
         }
-        for display_object in ancestors.into_iter().rev() {
+        // Like `local_to_global_matrix`, each object's scroll rect offsets
+        // what is inside it, its own included.
+        for display_object in ancestors.into_iter().rev().chain([self]) {
             stack.push(&display_object.base().transform(true));
+            if let Some(rect) = display_object.scroll_rect() {
+                stack.push(&Transform {
+                    matrix: Matrix::translate(-rect.x_min, -rect.y_min),
+                    ..Default::default()
+                });
+            }
         }
-        stack.push(&self.base().transform(true));
         stack.transform().matrix3d
     }
 
