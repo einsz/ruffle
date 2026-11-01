@@ -1,0 +1,22 @@
+num_ticks = 1
+
+[[compilers]]
+type = "Asc"
+target = "test.swf"
+class = "Test"
+scripts = ["Test.as"]
+swf_version = 15
+
+# Flash Player renders 3D objects differently around their edges, so allow
+# those pixels to differ. Even the smallest object, the bitmap, accounts for
+# more channels than the margins, so the checks fail if one goes missing.
+[[image_comparisons.output.checks]]
+tolerance = 10
+max_outliers = 10000
+
+[[image_comparisons.output.checks]]
+tolerance = 100
+max_outliers = 5000
+
+[player_options]
+with_renderer = { optional = true, quality = "high" }

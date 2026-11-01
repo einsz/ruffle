@@ -191,18 +191,22 @@ impl ChunkBufferBuilder {
     }
 
     pub fn add_transform(&mut self, transform: &Transform) -> Result<u32, BufferFull> {
-        let instance = Transforms {
-            world_matrix: [
+        let world_matrix = match transform.matrix3d {
+            Some(matrix3d) => bytemuck::cast(matrix3d.raw_data),
+            None => [
                 [transform.matrix.a, transform.matrix.b, 0.0, 0.0],
                 [transform.matrix.c, transform.matrix.d, 0.0, 0.0],
                 [0.0, 0.0, 1.0, 0.0],
                 [
                     transform.matrix.tx.to_pixels() as f32,
                     transform.matrix.ty.to_pixels() as f32,
-                    transform.tz as f32,
+                    0.0,
                     1.0,
                 ],
             ],
+        };
+        let instance = Transforms {
+            world_matrix,
             mult_color: transform.color_transform.mult_rgba_normalized(),
             add_color: transform.color_transform.add_rgba_normalized(),
         };
