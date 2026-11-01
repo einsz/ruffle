@@ -1592,7 +1592,12 @@ pub fn load_netstream<'gc>(
                             match chunk {
                                 Ok(Some(mut data)) => stream.load_buffer(uc, &mut data),
                                 Ok(None) => stream.finish_buffer(),
-                                Err(err) => stream.report_error(err),
+                                Err(err) => {
+                                    // The download ends here: play what has
+                                    // arrived, then stop.
+                                    stream.finish_buffer();
+                                    stream.report_error(err);
+                                }
                             }
                             Ok(true)
                         })?;
