@@ -278,6 +278,10 @@ pub struct NetStreamData<'gc> {
     /// The URL of the requested FLV if one exists.
     url: RefCell<Option<String>>,
 
+    /// Counts the downloads started by `play`, so that a download replaced
+    /// by another one, or by `close`, stops filling the buffer.
+    load_id: Cell<u32>,
+
     /// The MovieClip this `NetStream` is attached to.
     attached_to: Lock<Option<MovieClip<'gc>>>,
 
@@ -488,6 +492,7 @@ impl<'gc> NetStream<'gc> {
                 avm_object: Lock::new(avm_object),
                 avm2_client: Lock::new(None),
                 url: RefCell::new(None),
+                load_id: Cell::new(0),
                 attached_to: Lock::new(None),
                 playing: Cell::new(false),
                 data_generation_mode: Cell::new(false),
@@ -942,7 +947,9 @@ impl<'gc> NetStream<'gc> {
             self.source().preload_offset.set(0);
             self.reset_buffer(context);
 
-            let future = crate::loader::load_netstream(context, self, request);
+            let load_id = self.0.load_id.get().wrapping_add(1);
+            self.0.load_id.set(load_id);
+            let future = crate::loader::load_netstream(context, self, request, load_id);
 
             context.navigator.spawn_future(future);
         }
@@ -957,6 +964,21 @@ impl<'gc> NetStream<'gc> {
                 [("code", "NetStream.Play.Start"), ("level", "status")],
             );
         }
+    }
+
+    /// The download started by the last call to `play`, see `load_id`.
+    pub fn load_id(self) -> u32 {
+        self.0.load_id.get()
+    }
+
+    /// Stop playback and drop the stream's data, as `NetStream.close()`
+    /// does: time and bytes go back to 0, and no further status events
+    /// come until the stream is played again.
+    pub fn close(self, context: &mut UpdateContext<'gc>) {
+        self.0.load_id.set(self.0.load_id.get().wrapping_add(1));
+        self.0.playing.set(false);
+        self.reset_buffer(context);
+        StreamManager::deactivate(context, self);
     }
 
     /// Pause stream playback.

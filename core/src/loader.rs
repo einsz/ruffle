@@ -1544,10 +1544,14 @@ pub fn load_sound_avm2<'gc>(
 }
 
 /// Buffer video or audio into a NetStream.
+///
+/// `load_id` is the stream's `load_id` for this download: once the stream
+/// starts another one, or is closed, this one stops.
 pub fn load_netstream<'gc>(
     uc: &UpdateContext<'gc>,
     stream: NetStream<'gc>,
     request: Request,
+    load_id: u32,
 ) -> OwnedFuture<(), Error> {
     let player = uc.player_handle();
     let stream = NetStreamHandle::stash(uc, stream);
@@ -1558,30 +1562,40 @@ pub fn load_netstream<'gc>(
             Ok(mut response) => {
                 let expected_length = response.expected_length();
 
-                player.lock().unwrap().update(|uc| -> Result<(), Error> {
+                let is_current = player.lock().unwrap().update(|uc| -> Result<bool, Error> {
                     let stream = stream.fetch(uc);
+                    if stream.load_id() != load_id {
+                        return Ok(false);
+                    }
                     if let Ok(Some(len)) = expected_length {
                         stream.set_expected_length(len as usize);
                     }
 
-                    Ok(())
+                    Ok(true)
                 })?;
+                if !is_current {
+                    return Ok(());
+                }
 
                 loop {
                     let chunk = response.next_chunk().await;
                     let is_end = matches!(chunk, Ok(None));
-                    player.lock().unwrap().update(|uc| -> Result<(), Error> {
-                        let stream = stream.fetch(uc);
+                    let is_current =
+                        player.lock().unwrap().update(|uc| -> Result<bool, Error> {
+                            let stream = stream.fetch(uc);
+                            if stream.load_id() != load_id {
+                                return Ok(false);
+                            }
 
-                        match chunk {
-                            Ok(Some(mut data)) => stream.load_buffer(uc, &mut data),
-                            Ok(None) => stream.finish_buffer(),
-                            Err(err) => stream.report_error(err),
-                        }
-                        Ok(())
-                    })?;
+                            match chunk {
+                                Ok(Some(mut data)) => stream.load_buffer(uc, &mut data),
+                                Ok(None) => stream.finish_buffer(),
+                                Err(err) => stream.report_error(err),
+                            }
+                            Ok(true)
+                        })?;
 
-                    if is_end {
+                    if is_end || !is_current {
                         break;
                     }
                 }
