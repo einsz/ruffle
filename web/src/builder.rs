@@ -461,30 +461,49 @@ impl RuffleInstanceBuilder {
         index: u32,
         player: &mut Player,
     ) {
-        // TODO A font may have multiple full names, what then?
-        let full_name = face
-            .names()
-            .into_iter()
-            // Currently only unicode names are supported
-            .filter(|name| name.is_unicode())
-            .find(|name| name.name_id == ttf_parser::name_id::FULL_NAME)
-            .and_then(|name| name.to_string());
-
-        let name = if let Some(full_name) = full_name {
-            full_name
-        } else {
-            tracing::warn!("Font {url} at index {index} has no full name, using URL as font name");
-            url.to_string()
+        let unicode_names = |name_id| {
+            face.names()
+                .into_iter()
+                // Currently only unicode names are supported
+                .filter(move |name| name.is_unicode() && name.name_id == name_id)
+                .filter_map(|name| name.to_string())
         };
 
-        player.register_device_font(FontDefinition::FontFile {
-            name,
-            is_bold: face.is_bold(),
-            // Note: do not use is_italic() here, as we don't care about italic_angle
-            is_italic: face.style() != ttf_parser::Style::Normal,
-            data: FontFileData::new(bytes),
-            index,
-        });
+        // Content asks for a font by its family name and style, as with
+        // "Arial" and bold for the font named "Arial Bold", so register the
+        // font under its family names. A font may have them in several
+        // languages.
+        let mut names: Vec<String> = vec![];
+        for name in unicode_names(ttf_parser::name_id::FAMILY) {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        // Also register it under its full name, as before.
+        // TODO A font may have multiple full names, what then?
+        if let Some(full_name) = unicode_names(ttf_parser::name_id::FULL_NAME).next()
+            && !names.contains(&full_name)
+        {
+            names.push(full_name);
+        }
+        if names.is_empty() {
+            tracing::warn!("Font {url} at index {index} has no name, using URL as font name");
+            names.push(url.to_string());
+        }
+
+        let is_bold = face.is_bold();
+        // Note: do not use is_italic() here, as we don't care about italic_angle
+        let is_italic = face.style() != ttf_parser::Style::Normal;
+        let data: Arc<dyn AsRef<[u8]>> = Arc::new(bytes);
+        for name in names {
+            player.register_device_font(FontDefinition::FontFile {
+                name,
+                is_bold,
+                is_italic,
+                data: FontFileData::new_shared(data.clone()),
+                index,
+            });
+        }
     }
 
     pub fn create_log_subscriber(&self) -> Arc<Layered<WASMLayer, Registry>> {
