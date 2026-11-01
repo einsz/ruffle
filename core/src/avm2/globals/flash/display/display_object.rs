@@ -330,6 +330,23 @@ pub fn get_x<'gc>(
     Ok(Value::Undefined)
 }
 
+/// The exact position of a 3D object, which `x` and `y` set unrounded.
+fn matrix3d_position(dobj: DisplayObject<'_>) -> Option<(f32, f32)> {
+    dobj.base()
+        .matrix3d()
+        .map(|matrix3d| (matrix3d.raw_data[12], matrix3d.raw_data[13]))
+}
+
+/// `set_x`/`set_y` only see changes of whole twips, so a 3D object moved by
+/// less than that has to tell a cached ancestor itself.
+fn invalidate_parent_if_moved(dobj: DisplayObject<'_>, old_position: Option<(f32, f32)>) {
+    if matrix3d_position(dobj) != old_position
+        && let Some(parent) = dobj.parent()
+    {
+        parent.invalidate_cached_bitmap();
+    }
+}
+
 /// Implements `x`'s setter.
 pub fn set_x<'gc>(
     _activation: &mut Activation<'_, 'gc>,
@@ -340,8 +357,10 @@ pub fn set_x<'gc>(
 
     if let Some(dobj) = this.as_display_object() {
         let x = args.get_f64(0);
+        let old_position = matrix3d_position(dobj);
         dobj.set_x(Twips::from_pixels(x));
         dobj.base().set_matrix3d_position(Some(x), None);
+        invalidate_parent_if_moved(dobj, old_position);
     }
 
     Ok(Value::Undefined)
@@ -377,8 +396,10 @@ pub fn set_y<'gc>(
 
     if let Some(dobj) = this.as_display_object() {
         let y = args.get_f64(0);
+        let old_position = matrix3d_position(dobj);
         dobj.set_y(Twips::from_pixels(y));
         dobj.base().set_matrix3d_position(None, Some(y));
+        invalidate_parent_if_moved(dobj, old_position);
     }
 
     Ok(Value::Undefined)
