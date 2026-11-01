@@ -1,0 +1,8 @@
+appended copy 1, bytesLoaded 0, bytesTotal 0
+status NetStream.Buffer.Full
+time reached 20.0
+appended copy 2, bytesLoaded 0, bytesTotal 0
+time reached 44.9
+appended copy 3, bytesLoaded 0, bytesTotal 0
+status NetStream.Buffer.Empty
+stopped at time 75, bytesLoaded 0, bytesTotal 0
