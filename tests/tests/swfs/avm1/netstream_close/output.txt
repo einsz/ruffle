@@ -1,0 +1,7 @@
+onMetaData
+before close: time 0.5, bytes 4450/4450
+right after close: time 0, bytes 0/0
+24 frames after close: time 0, bytes 0/0
+onMetaData
+play again reached 0.3: time 0.3, bytes 4450/4450
+done
