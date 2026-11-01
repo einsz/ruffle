@@ -9,10 +9,10 @@ use crate::buffer_builder::BufferBuilder;
 use ruffle_render::backend::{ShapeHandle, ShapeHandleImpl};
 use ruffle_render::bitmap::BitmapSource;
 use ruffle_render::tessellator::{Bitmap, Draw as LyonDraw, DrawType as TessDrawType, Gradient};
-use swf::{CharacterId, GradientInterpolation};
+use swf::{CharacterId, GradientInterpolation, GradientRecord};
 
 /// How big to make gradient textures. Larger will keep more detail, but be slower and use more memory.
-const GRADIENT_SIZE: usize = 256;
+pub(crate) const GRADIENT_SIZE: usize = 256;
 
 #[derive(Debug)]
 pub struct Mesh {
@@ -259,67 +259,7 @@ impl CommonGradient {
         gradient: Gradient,
         uniform_buffers: &mut BufferBuilder,
     ) -> Self {
-        let colors = if gradient.records.is_empty() {
-            [0; GRADIENT_SIZE * 4]
-        } else {
-            let mut colors = [0; GRADIENT_SIZE * 4];
-            let mut last = 0;
-            let mut next;
-
-            let convert = if gradient.interpolation == GradientInterpolation::LinearRgb {
-                |c| srgb_to_linear(c / 255.0) * 255.0
-            } else {
-                |c| c
-            };
-
-            for t in 0..GRADIENT_SIZE {
-                if last + 1 < gradient.records.len()
-                    && t > gradient.records[last + 1].ratio as usize
-                {
-                    last += 1;
-                }
-                next = (last + 1).min(gradient.records.len() - 1);
-
-                assert!(last == next || last + 1 == next);
-
-                let last_record = &gradient.records[last];
-                let next_record = &gradient.records[next];
-
-                let a = if t <= last_record.ratio as usize || last_record.ratio == next_record.ratio
-                {
-                    // We are before the first gradient record,
-                    // or this record's ratio is equal to the next one,
-                    // meaning we need to do a full stop of this color for 1 pixel.
-                    0.0
-                } else if t > next_record.ratio as usize {
-                    // We are after the last record
-                    1.0
-                } else {
-                    (t as f32 - last_record.ratio as f32)
-                        / (next_record.ratio as f32 - last_record.ratio as f32)
-                };
-
-                colors[t * 4] = lerp(
-                    convert(last_record.color.r as f32),
-                    convert(next_record.color.r as f32),
-                    a,
-                ) as u8;
-                colors[(t * 4) + 1] = lerp(
-                    convert(last_record.color.g as f32),
-                    convert(next_record.color.g as f32),
-                    a,
-                ) as u8;
-                colors[(t * 4) + 2] = lerp(
-                    convert(last_record.color.b as f32),
-                    convert(next_record.color.b as f32),
-                    a,
-                ) as u8;
-                colors[(t * 4) + 3] =
-                    lerp(last_record.color.a as f32, next_record.color.a as f32, a) as u8;
-            }
-
-            colors
-        };
+        let colors = gradient_colors(&gradient.records, gradient.interpolation);
         let texture = descriptors.device.create_texture_with_data(
             &descriptors.queue,
             &wgpu::TextureDescriptor {
@@ -350,6 +290,71 @@ impl CommonGradient {
             texture_view: view,
             buffer_offset,
         }
+    }
+}
+
+/// The colors of a gradient, as `GRADIENT_SIZE` RGBA values.
+pub(crate) fn gradient_colors(
+    records: &[GradientRecord],
+    interpolation: GradientInterpolation,
+) -> [u8; GRADIENT_SIZE * 4] {
+    if records.is_empty() {
+        [0; GRADIENT_SIZE * 4]
+    } else {
+        let mut colors = [0; GRADIENT_SIZE * 4];
+        let mut last = 0;
+        let mut next;
+
+        let convert = if interpolation == GradientInterpolation::LinearRgb {
+            |c| srgb_to_linear(c / 255.0) * 255.0
+        } else {
+            |c| c
+        };
+
+        for t in 0..GRADIENT_SIZE {
+            if last + 1 < records.len() && t > records[last + 1].ratio as usize {
+                last += 1;
+            }
+            next = (last + 1).min(records.len() - 1);
+
+            assert!(last == next || last + 1 == next);
+
+            let last_record = &records[last];
+            let next_record = &records[next];
+
+            let a = if t <= last_record.ratio as usize || last_record.ratio == next_record.ratio {
+                // We are before the first gradient record,
+                // or this record's ratio is equal to the next one,
+                // meaning we need to do a full stop of this color for 1 pixel.
+                0.0
+            } else if t > next_record.ratio as usize {
+                // We are after the last record
+                1.0
+            } else {
+                (t as f32 - last_record.ratio as f32)
+                    / (next_record.ratio as f32 - last_record.ratio as f32)
+            };
+
+            colors[t * 4] = lerp(
+                convert(last_record.color.r as f32),
+                convert(next_record.color.r as f32),
+                a,
+            ) as u8;
+            colors[(t * 4) + 1] = lerp(
+                convert(last_record.color.g as f32),
+                convert(next_record.color.g as f32),
+                a,
+            ) as u8;
+            colors[(t * 4) + 2] = lerp(
+                convert(last_record.color.b as f32),
+                convert(next_record.color.b as f32),
+                a,
+            ) as u8;
+            colors[(t * 4) + 3] =
+                lerp(last_record.color.a as f32, next_record.color.a as f32, a) as u8;
+        }
+
+        colors
     }
 }
 

@@ -4,6 +4,7 @@ mod color_matrix;
 mod displacement_map;
 mod drop_shadow;
 mod glow;
+mod gradient;
 mod shader;
 
 use std::collections::HashSet;
@@ -17,10 +18,12 @@ use crate::filters::color_matrix::ColorMatrixFilter;
 use crate::filters::displacement_map::DisplacementMapFilter;
 use crate::filters::drop_shadow::DropShadowFilter;
 use crate::filters::glow::GlowFilter;
+use crate::filters::gradient::{GradientFilter, GradientFilterKind};
 use crate::filters::shader::ShaderFilter;
 use crate::surface::target::CommandTarget;
 use bytemuck::{Pod, Zeroable};
 use ruffle_render::filters::Filter;
+use swf::{Rectangle, Twips};
 use wgpu::util::StagingBelt;
 use wgpu::vertex_attr_array;
 
@@ -191,6 +194,7 @@ pub struct Filters {
     pub shader: ShaderFilter,
     pub glow: GlowFilter,
     pub bevel: BevelFilter,
+    pub gradient: GradientFilter,
     pub displacement_map: DisplacementMapFilter,
 }
 
@@ -202,10 +206,15 @@ impl Filters {
             shader: ShaderFilter::new(),
             glow: GlowFilter::new(device),
             bevel: BevelFilter::new(device),
+            gradient: GradientFilter::new(device),
             displacement_map: DisplacementMapFilter::new(device),
         }
     }
 
+    /// Applies a filter to `source`. `area` is the area of the texture that
+    /// the filter draws to, as given by `Filter::calculate_area`, if the
+    /// texture is larger.
+    #[expect(clippy::too_many_arguments)]
     pub fn apply(
         &self,
         descriptors: &Descriptors,
@@ -214,6 +223,7 @@ impl Filters {
         staging_belt: &mut StagingBelt,
         source: FilterSource,
         filter: Filter,
+        area: Option<Rectangle<Twips>>,
     ) -> CommandTarget {
         let target = match filter {
             Filter::ColorMatrixFilter(filter) => Some(descriptors.filters.color_matrix.apply(
@@ -268,6 +278,28 @@ impl Filters {
                 &filter,
                 &self.blur,
             )),
+            Filter::GradientGlowFilter(filter) => Some(descriptors.filters.gradient.apply(
+                descriptors,
+                texture_pool,
+                draw_encoder,
+                staging_belt,
+                &source,
+                &filter,
+                GradientFilterKind::Glow,
+                area,
+                &self.blur,
+            )),
+            Filter::GradientBevelFilter(filter) => Some(descriptors.filters.gradient.apply(
+                descriptors,
+                texture_pool,
+                draw_encoder,
+                staging_belt,
+                &source,
+                &filter,
+                GradientFilterKind::Bevel,
+                area,
+                &self.blur,
+            )),
             Filter::DisplacementMapFilter(filter) => descriptors.filters.displacement_map.apply(
                 descriptors,
                 texture_pool,
@@ -281,14 +313,14 @@ impl Filters {
                     LazyLock::new(Default::default);
 
                 let name = match filter {
-                    Filter::GradientGlowFilter(_) => "GradientGlowFilter",
-                    Filter::GradientBevelFilter(_) => "GradientBevelFilter",
                     Filter::ConvolutionFilter(_) => "ConvolutionFilter",
                     Filter::ColorMatrixFilter(_)
                     | Filter::BlurFilter(_)
                     | Filter::GlowFilter(_)
                     | Filter::DropShadowFilter(_)
                     | Filter::BevelFilter(_)
+                    | Filter::GradientGlowFilter(_)
+                    | Filter::GradientBevelFilter(_)
                     | Filter::DisplacementMapFilter(_)
                     | Filter::ShaderFilter(_) => unreachable!(),
                 };
