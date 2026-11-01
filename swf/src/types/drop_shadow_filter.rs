@@ -1,3 +1,4 @@
+use crate::types::blur_filter::{moved_area, pixel_offset};
 use crate::{
     BlurFilter, BlurFilterFlags, Color, Fixed8, Fixed16, GlowFilter, GlowFilterFlags, Rectangle,
     Twips,
@@ -62,6 +63,20 @@ impl DropShadowFilter {
             strength: self.strength,
             flags,
         }
+    }
+
+    /// The area that the drop shadow draws to, as in Flash: the blurred
+    /// source moved by the offset, together with the source.
+    pub fn calculate_area(&self, source_rect: Rectangle<Twips>) -> Rectangle<Twips> {
+        if self.is_inner() {
+            return source_rect;
+        }
+        let blurred = self.inner_blur_filter().calculate_area(source_rect);
+        moved_area(
+            source_rect,
+            blurred,
+            pixel_offset(self.angle, self.distance),
+        )
     }
 
     pub fn calculate_dest_rect(&self, source_rect: Rectangle<Twips>) -> Rectangle<Twips> {

@@ -1,3 +1,4 @@
+use crate::types::blur_filter::{extended_area, pixel_offset};
 use crate::{BlurFilter, BlurFilterFlags, Color, Fixed8, Fixed16, Rectangle, Twips};
 use bitflags::bitflags;
 
@@ -46,6 +47,16 @@ impl BevelFilter {
             blur_y: self.blur_y,
             flags: BlurFilterFlags::from_passes(self.num_passes()),
         }
+    }
+
+    /// The area that the bevel draws to, as in Flash: the blurred source,
+    /// extended by the offset on both sides.
+    pub fn calculate_area(&self, source_rect: Rectangle<Twips>) -> Rectangle<Twips> {
+        if self.is_inner() && !self.is_on_top() {
+            return source_rect;
+        }
+        let blurred = self.inner_blur_filter().calculate_area(source_rect);
+        extended_area(blurred, pixel_offset(self.angle, self.distance))
     }
 
     pub fn calculate_dest_rect(&self, source_rect: Rectangle<Twips>) -> Rectangle<Twips> {
