@@ -390,6 +390,8 @@ impl<'gc> TDisplayObject<'gc> for Bitmap<'gc> {
 
     fn render_self(self, context: &mut RenderContext<'_, 'gc>) {
         if !context.is_offscreen
+            // The bounds of 3D objects are not projected yet.
+            && !context.transform_stack.is_3d()
             && !self
                 .world_bounds(BoundsMode::Engine)
                 .intersects(&context.stage.view_bounds())
