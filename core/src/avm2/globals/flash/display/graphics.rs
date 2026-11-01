@@ -350,6 +350,20 @@ fn scale_mode_to_allow_scale_bits<'gc>(scale_mode: &WStr) -> Result<(bool, bool)
     }
 }
 
+/// Converts a line thickness to a width, as Flash Player does: beyond 2^31,
+/// only the low 32 bits of the integer part count, and beyond 2^63
+/// (including infinities), the thickness is 0.
+fn line_width(thickness: f64) -> Twips {
+    let thickness = if thickness.abs() < 2_147_483_648.0 {
+        thickness
+    } else if thickness.abs() < 9_223_372_036_854_775_808.0 {
+        f64::from(thickness as i64 as i32)
+    } else {
+        0.0
+    };
+    Twips::from_pixels(thickness.clamp(0.0, 255.0))
+}
+
 /// Implements `Graphics.lineStyle`.
 pub fn line_style<'gc>(
     activation: &mut Activation<'_, 'gc>,
@@ -374,7 +388,7 @@ pub fn line_style<'gc>(
             let joints = args.try_get_string(6);
             let miter_limit = args.get_f64(7);
 
-            let width = Twips::from_pixels(thickness.clamp(0.0, 255.0));
+            let width = line_width(thickness);
             let color = color_from_args(color, alpha);
             let join_style = joints_to_join_style(joints, miter_limit);
             let (allow_scale_x, allow_scale_y) = scale_mode_to_allow_scale_bits(&scale_mode)?;
@@ -1558,7 +1572,7 @@ fn handle_igraphics_data<'gc>(
                 .get_slot(graphics_stroke_slots::_SCALE_MODE)
                 .coerce_to_string(activation)?;
 
-            let width = Twips::from_pixels(thickness.clamp(0.0, 255.0));
+            let width = line_width(thickness);
             let join_style = joints_to_join_style(joints, miter_limit);
             let (allow_scale_x, allow_scale_y) = scale_mode_to_allow_scale_bits(&scale_mode)?;
 
