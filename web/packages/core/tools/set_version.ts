@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 
 let buildDate = new Date().toISOString();
 let versionNumber = process.env["npm_package_version"] ?? "";
-let versionChannel = process.env["CFG_RELEASE_CHANNEL"] || "local";
+let versionChannel = process.env["CFG_RELEASE_CHANNEL"] || "z0r";
 const firefoxExtensionId =
     process.env["FIREFOX_EXTENSION_ID"] || "ruffle@ruffle.rs";
 
