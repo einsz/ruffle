@@ -35,5 +35,5 @@ jpeg-decoder = { git = "https://github.com/einsz/jpeg-decoder", rev = "c7f37aeda
 # zero byte), and decode disposable P-frames, ruffle-rs/h263-rs. Branch z0r
 # of einsz/h263-rs has both.
 [patch."https://github.com/ruffle-rs/h263-rs"]
-h263-rs = { git = "https://github.com/einsz/h263-rs", rev = "f16b86e5e9a414a5bed99ade9ddafc8427ac9406" }
-h263-rs-deblock = { git = "https://github.com/einsz/h263-rs", rev = "f16b86e5e9a414a5bed99ade9ddafc8427ac9406" }
+h263-rs = { git = "https://github.com/einsz/h263-rs", rev = "09520243f94ea7a7712da021993b7e8aeaa855a4" }
+h263-rs-deblock = { git = "https://github.com/einsz/h263-rs", rev = "09520243f94ea7a7712da021993b7e8aeaa855a4" }
