@@ -1,0 +1,9 @@
+whole: onMetaData 1, duration 1
+whole: played on past 0.7
+split in halves: onMetaData 1, duration 1
+split in halves: played on past 0.7
+split in the header: onMetaData 1, duration 1
+split in the header: played on past 0.7
+split in 7: onMetaData 1, duration 1
+split in 7: played on past 0.7
+done
