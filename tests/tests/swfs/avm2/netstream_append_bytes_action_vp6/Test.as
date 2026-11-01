@@ -14,6 +14,7 @@ package {
     // onMetaData tag. Seeking from onMetaData and appending the video tags
     // again after RESET_SEEK, without the metadata: they play at their
     // full size.
+    [SWF(width="640", height="480")]
     public class Test extends Sprite {
         private var connection:NetConnection = new NetConnection();
 
@@ -46,7 +47,7 @@ package {
                     }
                 }
             };
-            var video:Video = new Video(320, 240);
+            var video:Video = new Video(640, 480);
             video.attachNetStream(s);
             addChild(video);
             s.play(null);
