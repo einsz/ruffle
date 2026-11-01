@@ -6,8 +6,8 @@ use crate::avm2::error::{make_error_2005, make_error_2007, make_error_2008, make
 use crate::avm2::filters::FilterAvm2Ext;
 use crate::avm2::function::FunctionArgs;
 use crate::avm2::globals::flash::geom::transform::color_transform_from_transform_object;
-use crate::avm2::globals::flash::geom::transform::has_matrix3d_from_transform_object;
 use crate::avm2::globals::flash::geom::transform::matrix_from_transform_object;
+use crate::avm2::globals::flash::geom::transform::matrix3d_from_transform_object;
 use crate::avm2::globals::slots::flash_display_shader as shader_slots;
 use crate::avm2::globals::slots::flash_geom_point as point_slots;
 use crate::avm2::globals::slots::flash_geom_rectangle as rectangle_slots;
@@ -319,7 +319,12 @@ pub fn get_x<'gc>(
     let this = this.as_object().unwrap();
 
     if let Some(dobj) = this.as_display_object() {
-        return Ok(dobj.x().to_pixels().into());
+        // A 3D object's position isn't rounded to twips.
+        return Ok(match dobj.base().matrix3d() {
+            Some(matrix3d) => matrix3d.raw_data[12].into(),
+            None => dobj.x().to_pixels(),
+        }
+        .into());
     }
 
     Ok(Value::Undefined)
@@ -336,6 +341,7 @@ pub fn set_x<'gc>(
     if let Some(dobj) = this.as_display_object() {
         let x = args.get_f64(0);
         dobj.set_x(Twips::from_pixels(x));
+        dobj.base().set_matrix3d_position(Some(x), None);
     }
 
     Ok(Value::Undefined)
@@ -350,7 +356,12 @@ pub fn get_y<'gc>(
     let this = this.as_object().unwrap();
 
     if let Some(dobj) = this.as_display_object() {
-        return Ok(dobj.y().to_pixels().into());
+        // A 3D object's position isn't rounded to twips.
+        return Ok(match dobj.base().matrix3d() {
+            Some(matrix3d) => matrix3d.raw_data[13].into(),
+            None => dobj.y().to_pixels(),
+        }
+        .into());
     }
 
     Ok(Value::Undefined)
@@ -367,6 +378,7 @@ pub fn set_y<'gc>(
     if let Some(dobj) = this.as_display_object() {
         let y = args.get_f64(0);
         dobj.set_y(Twips::from_pixels(y));
+        dobj.base().set_matrix3d_position(None, Some(y));
     }
 
     Ok(Value::Undefined)
@@ -386,54 +398,90 @@ pub fn get_z<'gc>(
 }
 
 pub fn set_z<'gc>(
-    activation: &mut Activation<'_, 'gc>,
+    _activation: &mut Activation<'_, 'gc>,
     this: Value<'gc>,
     args: FunctionArgs<'_, 'gc>,
 ) -> Result<Value<'gc>, Error<'gc>> {
-    avm2_stub_setter!(activation, "flash.display.DisplayObject", "z");
     let this = this.as_object().unwrap();
 
     if let Some(dobj) = this.as_display_object() {
-        let z = args.get_f64(0);
-        dobj.set_z(z);
-        dobj.base().set_has_matrix3d_stub(true);
+        dobj.set_z(args.get_f64(0));
     }
     Ok(Value::Undefined)
 }
 
+/// Normalizes a rotation into the range of [-180, 180], as the rotation setter
+/// does for 2D objects. 3D objects keep their rotations as they are set.
+fn normalize_rotation(rotation: f64) -> Degrees {
+    let mut rotation = rotation % 360.0;
+    if rotation < -180.0 {
+        rotation += 360.0
+    } else if rotation > 180.0 {
+        rotation -= 360.0
+    }
+    Degrees::from(rotation)
+}
+
+/// Normalizes a rotation into the range of (-180, 180], as the rotation getter
+/// does for 2D objects.
+fn rotation_to_value<'gc>(rotation: Degrees) -> Value<'gc> {
+    let rem = f64::from(rotation) % 360.0;
+    if rem <= 180.0 {
+        rem.into()
+    } else {
+        (rem - 360.0).into()
+    }
+}
+
 pub fn get_rotation_x<'gc>(
-    activation: &mut Activation<'_, 'gc>,
-    _this: Value<'gc>,
+    _activation: &mut Activation<'_, 'gc>,
+    this: Value<'gc>,
     _args: FunctionArgs<'_, 'gc>,
 ) -> Result<Value<'gc>, Error<'gc>> {
-    avm2_stub_getter!(activation, "flash.display.DisplayObject", "rotationX");
-    Ok(0.into())
+    let this = this.as_object().unwrap();
+
+    if let Some(dobj) = this.as_display_object() {
+        return Ok(f64::from(dobj.rotation_x()).into());
+    }
+    Ok(Value::Undefined)
 }
 
 pub fn set_rotation_x<'gc>(
-    activation: &mut Activation<'_, 'gc>,
-    _this: Value<'gc>,
-    _args: FunctionArgs<'_, 'gc>,
+    _activation: &mut Activation<'_, 'gc>,
+    this: Value<'gc>,
+    args: FunctionArgs<'_, 'gc>,
 ) -> Result<Value<'gc>, Error<'gc>> {
-    avm2_stub_setter!(activation, "flash.display.DisplayObject", "rotationX");
+    let this = this.as_object().unwrap();
+
+    if let Some(dobj) = this.as_display_object() {
+        dobj.set_rotation_x(Degrees::from(args.get_f64(0)));
+    }
     Ok(Value::Undefined)
 }
 
 pub fn get_rotation_y<'gc>(
-    activation: &mut Activation<'_, 'gc>,
-    _this: Value<'gc>,
+    _activation: &mut Activation<'_, 'gc>,
+    this: Value<'gc>,
     _args: FunctionArgs<'_, 'gc>,
 ) -> Result<Value<'gc>, Error<'gc>> {
-    avm2_stub_getter!(activation, "flash.display.DisplayObject", "rotationY");
-    Ok(0.into())
+    let this = this.as_object().unwrap();
+
+    if let Some(dobj) = this.as_display_object() {
+        return Ok(f64::from(dobj.rotation_y()).into());
+    }
+    Ok(Value::Undefined)
 }
 
 pub fn set_rotation_y<'gc>(
-    activation: &mut Activation<'_, 'gc>,
-    _this: Value<'gc>,
-    _args: FunctionArgs<'_, 'gc>,
+    _activation: &mut Activation<'_, 'gc>,
+    this: Value<'gc>,
+    args: FunctionArgs<'_, 'gc>,
 ) -> Result<Value<'gc>, Error<'gc>> {
-    avm2_stub_setter!(activation, "flash.display.DisplayObject", "rotationY");
+    let this = this.as_object().unwrap();
+
+    if let Some(dobj) = this.as_display_object() {
+        dobj.set_rotation_y(Degrees::from(args.get_f64(0)));
+    }
     Ok(Value::Undefined)
 }
 
@@ -442,36 +490,45 @@ pub fn get_rotation_z<'gc>(
     this: Value<'gc>,
     args: FunctionArgs<'_, 'gc>,
 ) -> Result<Value<'gc>, Error<'gc>> {
-    // TODO This probably interacts with Matrix3D.
-    avm2_stub_getter!(activation, "flash.display.DisplayObject", "rotationZ");
     get_rotation(activation, this, args)
 }
 
 pub fn set_rotation_z<'gc>(
-    activation: &mut Activation<'_, 'gc>,
+    _activation: &mut Activation<'_, 'gc>,
     this: Value<'gc>,
     args: FunctionArgs<'_, 'gc>,
 ) -> Result<Value<'gc>, Error<'gc>> {
-    // TODO This probably interacts with Matrix3D.
-    avm2_stub_setter!(activation, "flash.display.DisplayObject", "rotationZ");
-    set_rotation(activation, this, args)
+    let this = this.as_object().unwrap();
+
+    if let Some(dobj) = this.as_display_object() {
+        dobj.set_rotation_z(Degrees::from(args.get_f64(0)));
+    }
+    Ok(Value::Undefined)
 }
 
 pub fn get_scale_z<'gc>(
-    activation: &mut Activation<'_, 'gc>,
-    _this: Value<'gc>,
+    _activation: &mut Activation<'_, 'gc>,
+    this: Value<'gc>,
     _args: FunctionArgs<'_, 'gc>,
 ) -> Result<Value<'gc>, Error<'gc>> {
-    avm2_stub_getter!(activation, "flash.display.DisplayObject", "scaleZ");
-    Ok(1.into())
+    let this = this.as_object().unwrap();
+
+    if let Some(dobj) = this.as_display_object() {
+        return Ok(dobj.scale_z().into());
+    }
+    Ok(Value::Undefined)
 }
 
 pub fn set_scale_z<'gc>(
-    activation: &mut Activation<'_, 'gc>,
-    _this: Value<'gc>,
-    _args: FunctionArgs<'_, 'gc>,
+    _activation: &mut Activation<'_, 'gc>,
+    this: Value<'gc>,
+    args: FunctionArgs<'_, 'gc>,
 ) -> Result<Value<'gc>, Error<'gc>> {
-    avm2_stub_setter!(activation, "flash.display.DisplayObject", "scaleZ");
+    let this = this.as_object().unwrap();
+
+    if let Some(dobj) = this.as_display_object() {
+        dobj.set_scale_z(args.get_f64(0));
+    }
     Ok(Value::Undefined)
 }
 
@@ -484,14 +541,10 @@ pub fn get_rotation<'gc>(
     let this = this.as_object().unwrap();
 
     if let Some(dobj) = this.as_display_object() {
-        let rot: f64 = dobj.rotation().into();
-        let rem = rot % 360.0;
-
-        if rem <= 180.0 {
-            return Ok(rem.into());
-        } else {
-            return Ok((rem - 360.0).into());
+        if dobj.matrix3d().is_some() {
+            return Ok(f64::from(dobj.rotation()).into());
         }
+        return Ok(rotation_to_value(dobj.rotation()));
     }
 
     Ok(Value::Undefined)
@@ -506,17 +559,12 @@ pub fn set_rotation<'gc>(
     let this = this.as_object().unwrap();
 
     if let Some(dobj) = this.as_display_object() {
-        let mut new_rotation = args.get_f64(0);
-
-        // Normalize into the range of [-180, 180].
-        new_rotation %= 360.0;
-        if new_rotation < -180.0 {
-            new_rotation += 360.0
-        } else if new_rotation > 180.0 {
-            new_rotation -= 360.0
+        let rotation = args.get_f64(0);
+        if dobj.matrix3d().is_some() {
+            dobj.set_rotation(Degrees::from(rotation));
+        } else {
+            dobj.set_rotation(normalize_rotation(rotation));
         }
-
-        dobj.set_rotation(Degrees::from(new_rotation));
     }
 
     Ok(Value::Undefined)
@@ -830,13 +878,16 @@ pub fn set_transform<'gc>(
 
     // FIXME - consider pixel bounds
     let matrix = matrix_from_transform_object(transform);
-    let has_matrix3d = has_matrix3d_from_transform_object(transform);
+    let matrix3d = matrix3d_from_transform_object(transform);
     let color_transform = color_transform_from_transform_object(transform);
 
     let dobj = this.as_display_object().unwrap();
     let base = dobj.base();
-    base.set_matrix(matrix);
-    base.set_has_matrix3d_stub(has_matrix3d);
+    if matrix3d.is_some() {
+        base.set_matrix3d(matrix3d);
+    } else {
+        base.set_matrix(matrix);
+    }
     base.set_color_transform(color_transform);
     if let Some(parent) = dobj.parent() {
         // Self-transform changes are automatically handled,
@@ -1028,9 +1079,33 @@ fn get_dobj_bounds<'gc>(
         // Calculate the matrix to transform into the target coordinate space, and transform the above AABB.
         // Note that this doesn't produce as tight of an AABB as if we had used `bounds_with_transform` with
         // the final matrix, but this matches Flash's behavior.
-        let to_global_matrix = dobj.local_to_global_matrix();
         let to_target_matrix = target.global_to_local_matrix().unwrap_or_default();
-        to_target_matrix * to_global_matrix * bounds
+        if let Some(to_global_matrix3d) = dobj
+            .local_to_global_matrix3d()
+            .filter(|_| bounds.is_valid())
+        {
+            // A 3D object's bounds are the projection of its local bounds.
+            let corners = [
+                (bounds.x_min, bounds.y_min),
+                (bounds.x_max, bounds.y_min),
+                (bounds.x_min, bounds.y_max),
+                (bounds.x_max, bounds.y_max),
+            ];
+            corners
+                .into_iter()
+                .map(|(x, y)| {
+                    let (x, y) = to_global_matrix3d
+                        .transform_point_2d(x.to_pixels() as f32, y.to_pixels() as f32);
+                    to_target_matrix
+                        * Point::new(Twips::from_pixels(x.into()), Twips::from_pixels(y.into()))
+                })
+                .fold(Rectangle::default(), |bounds, point| {
+                    bounds.encompass(point)
+                })
+        } else {
+            let to_global_matrix = dobj.local_to_global_matrix();
+            to_target_matrix * to_global_matrix * bounds
+        }
     };
     if !out_bounds.is_valid() {
         out_bounds = Rectangle::ZERO;

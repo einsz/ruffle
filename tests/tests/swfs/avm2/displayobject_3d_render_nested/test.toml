@@ -1,0 +1,23 @@
+num_ticks = 1
+
+[[compilers]]
+type = "Asc"
+target = "test.swf"
+class = "Test"
+scripts = ["Test.as"]
+swf_version = 15
+
+# Flash Player renders 3D objects differently around their edges, so allow
+# those pixels to differ. The checks still fail if the filtered object's
+# children lose their perspective or get cut off, or the text field's
+# background is not projected.
+[[image_comparisons.output.checks]]
+tolerance = 10
+max_outliers = 9500
+
+[[image_comparisons.output.checks]]
+tolerance = 100
+max_outliers = 4000
+
+[player_options]
+with_renderer = { optional = true, quality = "high" }
