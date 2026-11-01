@@ -188,8 +188,10 @@ impl ShapeTessellator {
 
                     // Larger scales require more precise tessellation to avoid artifacts
                     let tolerance = StrokeToFillOptions::DEFAULT_TOLERANCE / scale;
+                    // Flash draws nothing for subpaths of zero length, whatever their caps.
                     let mut stroke_options = StrokeToFillOptions::new(width)
                         .with_tolerance(tolerance)
+                        .with_empty_caps(false)
                         .with_start_cap(match style.start_cap() {
                             swf::LineCapStyle::None => stroke::LineCap::Butt,
                             swf::LineCapStyle::Round => stroke::LineCap::Round,
