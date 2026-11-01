@@ -1779,7 +1779,7 @@ pub trait TDisplayObject<'gc>:
         if let Some(stage) = stage {
             stack.set_stage_width(stage.stage_size().0 as f32);
             stack.push(&Transform {
-                perspective_projection: stage.render_perspective_projection(),
+                perspective_projection: stage.as_displayobject().base().perspective_projection(),
                 ..Default::default()
             });
         }
