@@ -1,0 +1,19 @@
+num_ticks = 70
+
+[player_options]
+with_audio = true
+
+[audio_assertions.before_seek]
+frames = { from = 5, to = 24 }
+min_max_amplitude = 0.1
+
+[audio_assertions.after_seek]
+frames = { from = 32, to = 60 }
+min_max_amplitude = 0.1
+
+[[compilers]]
+type = "Asc"
+target = "test.swf"
+class = "Test"
+scripts = ["Test.as"]
+swf_version = 43

@@ -1,0 +1,8 @@
+onMetaData
+NetStream.Buffer.Full
+seek at time 1.0
+NetStream.SeekStart.Notify
+NetStream.Seek.Notify
+onMetaData
+NetStream.Buffer.Full
+played on past 1.5
