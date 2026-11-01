@@ -1466,6 +1466,8 @@ pub fn draw<'gc>(
     }
 
     let mut transform_stack = ruffle_render::transform::TransformStack::new();
+    // FIXME: Flash projects 3D objects differently here.
+    transform_stack.set_target_projection(target.width(), target.height());
     transform_stack.push(&transform);
 
     let mut cache_draws = vec![];

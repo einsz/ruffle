@@ -728,26 +728,8 @@ pub fn recompose<'gc>(
     let [rotation_x, rotation_y, rotation_z, rotation_w] = rotation;
     let [scale_x, scale_y, scale_z, _] = scale.map(|f| f as f32);
 
-    let mut rotation_matrix = [0.0; 16];
-    match orientation {
-        Orientation3D::EulerAngles => {
-            let cx = rotation_x.cos();
-            let cy = rotation_y.cos();
-            let cz = rotation_z.cos();
-            let sx = rotation_x.sin();
-            let sy = rotation_y.sin();
-            let sz = rotation_z.sin();
-
-            rotation_matrix[0] = cy * cz;
-            rotation_matrix[1] = cy * sz;
-            rotation_matrix[2] = -sy;
-            rotation_matrix[4] = sx * sy * cz - cx * sz;
-            rotation_matrix[5] = sx * sy * sz + cx * cz;
-            rotation_matrix[6] = sx * cy;
-            rotation_matrix[8] = cx * sy * cz + sx * sz;
-            rotation_matrix[9] = cx * sy * sz - sx * cz;
-            rotation_matrix[10] = cx * cy;
-        }
+    let rotation = match orientation {
+        Orientation3D::EulerAngles => Matrix3D::euler_rotation(rotation_x, rotation_y, rotation_z),
 
         Orientation3D::AxisAngle | Orientation3D::Quaternion => {
             let (mut x, mut y, mut z, mut w) = (rotation_x, rotation_y, rotation_z, rotation_w);
@@ -759,6 +741,7 @@ pub fn recompose<'gc>(
                 w = (w / 2.0).cos();
             }
 
+            let mut rotation_matrix = [0.0; 16];
             rotation_matrix[0] = 1.0 - 2.0 * y * y - 2.0 * z * z;
             rotation_matrix[1] = 2.0 * x * y + 2.0 * w * z;
             rotation_matrix[2] = 2.0 * x * z - 2.0 * w * y;
@@ -768,14 +751,14 @@ pub fn recompose<'gc>(
             rotation_matrix[8] = 2.0 * x * z + 2.0 * w * y;
             rotation_matrix[9] = 2.0 * y * z - 2.0 * w * x;
             rotation_matrix[10] = 1.0 - 2.0 * x * x - 2.0 * y * y;
+            rotation_matrix[15] = 1.0;
+            Matrix3D {
+                raw_data: rotation_matrix.map(|f| f as f32),
+            }
         }
-    }
-    rotation_matrix[15] = 1.0;
+    };
 
     let translation = Matrix3D::translate(translation_x, translation_y, translation_z);
-    let rotation = Matrix3D {
-        raw_data: rotation_matrix.map(|f| f as f32),
-    };
     let scale = Matrix3D::scale(scale_x, scale_y, scale_z);
 
     // The order of operations is observable when some of the components are not
