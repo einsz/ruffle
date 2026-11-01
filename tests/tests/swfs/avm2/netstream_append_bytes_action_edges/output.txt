@@ -1,0 +1,9 @@
+append on full: NetStream.Buffer.Full
+append on full: played on past 1.5
+seek after append: NetStream.SeekStart.Notify
+seek after append: NetStream.Seek.Notify
+seek after append: 24 frames later, time 0.0
+reset seek: appending at time 0.5
+reset seek: stopped at time 2
+audio format change: stopped
+done
