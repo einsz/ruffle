@@ -7,7 +7,7 @@ package {
     import flash.filters.GradientBevelFilter;
     import flash.filters.GradientGlowFilter;
 
-    [SWF(width="400", height="380", backgroundColor="#ffffff")]
+    [SWF(width="400", height="470", backgroundColor="#ffffff")]
     public class Test extends Sprite {
         public function Test() {
             // Opaque red at ratio 0 shows the filter's whole area, for
@@ -41,15 +41,20 @@ package {
             addChild(chained);
 
             // After other filters, which reach only about half as far as the
-            // room they need: a blur, a glow, a drop shadow, and with quality 0
-            // a gradient glow and a glow, which blur nothing.
+            // room they need: a blur, a glow, a drop shadow, with quality 0
+            // a gradient glow and a glow, which blur nothing, and filters with
+            // no blur.
             var red:GradientGlowFilter = new GradientGlowFilter(0, 0, [0xff0000, 0x00ff00], [1, 1], [0, 255], 0, 0, 1, 1, "outer");
             var after:Array = [
                 [new BlurFilter(4, 4, 3), red],
                 [new GlowFilter(0x000000, 1, 8, 8, 1, 1), red],
                 [new DropShadowFilter(10, 90, 0x000000, 1, 4, 4, 1, 1), red],
                 [new GradientGlowFilter(0, 0, [0xff0000, 0x00ff00], [1, 1], [0, 255], 10, 10, 1, 0, "outer")],
-                [new GlowFilter(0x000000, 1, 8, 8, 1, 0), red]
+                [new GlowFilter(0x000000, 1, 8, 8, 1, 0), red],
+                // Filters that blur nothing still add a pixel to the area.
+                [new GlowFilter(0x000000, 1, 0, 0, 1, 1), red],
+                [new GlowFilter(0x000000, 1, 0, 0, 1, 1), new GlowFilter(0x000000, 1, 0, 0, 1, 1), red],
+                [new DropShadowFilter(4, 0, 0x000000, 1, 0, 0, 1, 1), red]
             ];
             for (i = 0; i < after.length; i++) {
                 var shape:Shape = new Shape();
