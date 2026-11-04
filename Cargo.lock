@@ -1665,6 +1665,7 @@ dependencies = [
  "rayon",
  "ruffle_core",
  "ruffle_render_wgpu",
+ "ruffle_video_software",
  "walkdir",
 ]
 
