@@ -1,0 +1,13 @@
+root pp: fov 55 center 275,200
+sprite pp: null
+rotationY 30 at 275,200: bounds within 2 px of Flash, rect within 2 px of Flash, own bounds 0,0,100,100
+rotationY 60 at 100,50: bounds within 2 px of Flash, rect within 2 px of Flash, own bounds 0,0,100,100
+rotationY -45 at 400,250: bounds within 2 px of Flash, rect within 2 px of Flash, own bounds 0,0,100,100
+nested rotationX 45: bounds within 2 px of Flash, in box within 2 px of Flash
+x/y after rotationY: 21.9,33.35
+x/y set under 3D: 12.345,6.789
+x/y/z after z: 12.345,6.789,5.5
+loaded root pp: fov 55 center 275,200
+in scrollRect, 2D: bounds 120,110,100,100
+in scrollRect, z 0: bounds 120,110,100,100
+stage child: bounds within 2 px of Flash

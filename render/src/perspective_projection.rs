@@ -23,6 +23,15 @@ impl Default for PerspectiveProjection {
 impl PerspectiveProjection {
     const DEG2RAD: f64 = PI / 180.0;
 
+    /// The default projection, centered on a stage of the given size, as a
+    /// movie's root starts with.
+    pub fn centered(width: f64, height: f64) -> Self {
+        Self {
+            center: (width / 2.0, height / 2.0),
+            ..Default::default()
+        }
+    }
+
     pub fn from_focal_length(focal_length: f64, width: f64) -> Self {
         Self {
             field_of_view: f64::atan((width / 2.0) / focal_length) / Self::DEG2RAD * 2.0,

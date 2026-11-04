@@ -37,10 +37,10 @@ null
 [object Test]
 0.5
 0.5
-1
+0.5
 45
-0
-0
+45
+45
 45
 false
 true
