@@ -163,33 +163,33 @@ struct Sound {
     /// This is `0` unless `format.compression` is `AudioCompression::Mp3`.
     skip_sample_frames: u16,
 
-    /// The number of sample frames actually contained in the MP3 data.
+    /// The duration of the sound, as reported to ActionScript.
     ///
-    /// This is only calculated when needed, as the whole MP3 data has to be read for it.
-    mp3_num_sample_frames: OnceLock<u32>,
+    /// For an embedded MP3 sound this is only computed when needed, as the whole MP3 data has
+    /// to be read for it.
+    duration: OnceLock<FloatDuration>,
 }
 
 impl Sound {
-    /// Returns the length of this sound in sample frames, as reported to ActionScript.
+    /// Returns the duration of this embedded sound, as reported to ActionScript.
     ///
     /// This is the number of sample frames from the SWF header, but for MP3 sounds Flash Player
     /// caps it at the number of sample frames in the MP3 data. Some SWF tools write a number
     /// that is too large, e.g. as if MPEG-2 frames had 1152 samples instead of 576.
     /// Unlike the number from the SWF header, the number of sample frames in the MP3 data
     /// includes `skip_sample_frames`, and Flash Player does not subtract it either.
-    fn length_sample_frames(&self) -> u32 {
-        if self.format.compression != AudioCompression::Mp3 {
-            return self.num_sample_frames;
+    fn embedded_duration(&self) -> FloatDuration {
+        let mut num_sample_frames = f64::from(self.num_sample_frames);
+        if self.format.compression == AudioCompression::Mp3 {
+            num_sample_frames = num_sample_frames.min(super::mp3_frames::mp3_sample_frames(
+                &self.data,
+                self.format.sample_rate,
+            ));
         }
-
-        #[cfg(feature = "mp3")]
-        let mp3_num_sample_frames = *self.mp3_num_sample_frames.get_or_init(|| {
-            decoders::mp3_num_sample_frames(self.data.clone()).unwrap_or(self.num_sample_frames)
-        });
-        #[cfg(not(feature = "mp3"))]
-        let mp3_num_sample_frames = self.num_sample_frames;
-
-        self.num_sample_frames.min(mp3_num_sample_frames)
+        // Flash Player divides by the sample rate in kHz here, which can differ in the last bit
+        // from multiplying by 1000 first, as it does for a loaded MP3 file.
+        let sample_rate = f64::from(self.format.sample_rate);
+        FloatDuration::from_millis(num_sample_frames / (sample_rate / 1000.0))
     }
 }
 
@@ -556,7 +556,7 @@ impl AudioMixer {
             data: Arc::from(data),
             num_sample_frames: swf_sound.num_samples,
             skip_sample_frames,
-            mp3_num_sample_frames: OnceLock::new(),
+            duration: OnceLock::new(),
         };
         Ok(self.sounds.insert(sound))
     }
@@ -577,8 +577,9 @@ impl AudioMixer {
             data,
             num_sample_frames: metadata.num_sample_frames,
             skip_sample_frames: 0,
-            // The number of sample frames already comes from the MP3 data.
-            mp3_num_sample_frames: OnceLock::from(metadata.num_sample_frames),
+            duration: OnceLock::from(FloatDuration::from_millis(
+                f64::from(metadata.num_sample_frames) * 1000.0 / f64::from(metadata.sample_rate),
+            )),
         };
         Ok(self.sounds.insert(sound))
     }
@@ -704,14 +705,8 @@ impl AudioMixer {
     ///
     /// Returns `None` if the sound is not registered or invalid.
     pub fn get_sound_duration(&self, sound: SoundHandle) -> Option<FloatDuration> {
-        if let Some(sound) = self.sounds.get(sound) {
-            let num_sample_frames: f64 = sound.length_sample_frames().into();
-            let sample_rate: f64 = sound.format.sample_rate.into();
-            let ms = num_sample_frames * 1000.0 / sample_rate;
-            Some(FloatDuration::from_millis(ms))
-        } else {
-            None
-        }
+        let sound = self.sounds.get(sound)?;
+        Some(*sound.duration.get_or_init(|| sound.embedded_duration()))
     }
 
     pub fn get_sound_size(&self, sound: SoundHandle) -> Option<u32> {

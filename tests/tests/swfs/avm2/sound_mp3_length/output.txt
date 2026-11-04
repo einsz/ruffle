@@ -1,0 +1,14 @@
+MPEG-2, header exact: 574.6938775510204
+MPEG-2, header 2x: 574.6938775510204
+MPEG-2, header shorter: 362.81179138321994
+MPEG-2, header 2x, seek 1000: 574.6938775510204
+MPEG-2, header 2x, last frame only its header: 574.6938775510204
+MPEG-2, header 2x, last frame 3 bytes: 574.6938775510204
+MPEG-2, header 2x, last frame 24 bytes: 574.6938775510204
+MPEG-2, header 2x, 50 bytes before the first frame: 185.44217687074828
+MPEG-2, header 2x, 37 zero bytes after frame 10: 574.6938775510204
+MPEG-2, header 2x, Info frame: 600.8163265306122
+MPEG-1, header 2x: 548.5714285714286
+MPEG-2, header shorter (8018): 363.62811791383217
+PCM, 1003 samples: 45.4875283446712
+ADPCM, header 1005: 45.578231292517
