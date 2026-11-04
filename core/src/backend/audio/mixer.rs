@@ -9,7 +9,7 @@ use ruffle_common::duration::FloatDuration;
 use slotmap::{SecondaryMap, SlotMap};
 use std::collections::VecDeque;
 use std::io::Cursor;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use swf::AudioCompression;
 
 /// Holds the last 2048 output audio frames. Frames can be written to it one by
@@ -249,6 +249,12 @@ struct Sound {
     /// Whether `num_sample_frames` is exact, as declared by an SWF, rather
     /// than estimated from an MP3 file.
     num_sample_frames_is_exact: bool,
+
+    /// The duration of the sound, as reported to ActionScript.
+    ///
+    /// For an embedded MP3 sound this is only computed when needed, as the whole MP3 data has
+    /// to be read for it.
+    duration: OnceLock<FloatDuration>,
 }
 
 /// A sound being decoded by `AudioMixer::extract_sound`. Sample frames are
@@ -305,6 +311,29 @@ impl ExtractedSound {
         }
         self.window.push_back(frame);
         Some(frame)
+    }
+}
+
+impl Sound {
+    /// Returns the duration of this embedded sound, as reported to ActionScript.
+    ///
+    /// This is the number of sample frames from the SWF header, but for MP3 sounds Flash Player
+    /// caps it at the number of sample frames in the MP3 data. Some SWF tools write a number
+    /// that is too large, e.g. as if MPEG-2 frames had 1152 samples instead of 576.
+    /// Unlike the number from the SWF header, the number of sample frames in the MP3 data
+    /// includes `skip_sample_frames`, and Flash Player does not subtract it either.
+    fn embedded_duration(&self) -> FloatDuration {
+        let mut num_sample_frames = f64::from(self.num_sample_frames);
+        if self.format.compression == AudioCompression::Mp3 {
+            num_sample_frames = num_sample_frames.min(super::mp3_frames::mp3_sample_frames(
+                &self.data,
+                self.format.sample_rate,
+            ));
+        }
+        // Flash Player divides by the sample rate in kHz here, which can differ in the last bit
+        // from multiplying by 1000 first, as it does for a loaded MP3 file.
+        let sample_rate = f64::from(self.format.sample_rate);
+        FloatDuration::from_millis(num_sample_frames / (sample_rate / 1000.0))
     }
 }
 
@@ -682,6 +711,7 @@ impl AudioMixer {
             skip_sample_frames,
             lead_in_sample_frames: 0,
             num_sample_frames_is_exact: true,
+            duration: OnceLock::new(),
         };
         Ok(self.sounds.insert(sound))
     }
@@ -704,6 +734,12 @@ impl AudioMixer {
             skip_sample_frames: 0,
             lead_in_sample_frames: metadata.info_frame_sample_frames,
             num_sample_frames_is_exact: false,
+            duration: OnceLock::from(FloatDuration::from_millis(
+                (f64::from(metadata.num_sample_frames)
+                    + f64::from(metadata.info_frame_sample_frames))
+                    * 1000.0
+                    / f64::from(metadata.sample_rate),
+            )),
         };
         Ok(self.sounds.insert(sound))
     }
@@ -946,16 +982,8 @@ impl AudioMixer {
     ///
     /// Returns `None` if the sound is not registered or invalid.
     pub fn get_sound_duration(&self, sound: SoundHandle) -> Option<FloatDuration> {
-        if let Some(sound) = self.sounds.get(sound) {
-            // AS duration does not subtract `skip_sample_frames`.
-            let num_sample_frames =
-                f64::from(sound.num_sample_frames) + f64::from(sound.lead_in_sample_frames);
-            let sample_rate: f64 = sound.format.sample_rate.into();
-            let ms = num_sample_frames * 1000.0 / sample_rate;
-            Some(FloatDuration::from_millis(ms))
-        } else {
-            None
-        }
+        let sound = self.sounds.get(sound)?;
+        Some(*sound.duration.get_or_init(|| sound.embedded_duration()))
     }
 
     pub fn get_sound_size(&self, sound: SoundHandle) -> Option<u32> {
