@@ -1,18 +1,19 @@
 use crate::bitmap::BitmapSource;
 use crate::shape_utils::{DistilledShape, DrawCommand, DrawPath, GradientType};
 use indexmap::IndexSet;
-use lyon::path::Path;
+use lyon::algorithms::stroke::{self, StrokeToFillOptions, Stroker};
+use lyon::path::{FillRule, Path};
+use lyon::tessellation::FillOptions;
 use lyon::tessellation::{
-    self, FillTessellator, FillVertex, StrokeTessellator, StrokeVertex, StrokeVertexConstructor,
+    FillTessellator, FillVertex,
     geometry_builder::{BuffersBuilder, FillVertexConstructor, VertexBuffers},
 };
-use lyon::tessellation::{FillOptions, StrokeOptions};
 use swf::GradientRecord;
 use tracing::instrument;
 
 pub struct ShapeTessellator {
     fill_tess: FillTessellator,
-    stroke_tess: StrokeTessellator,
+    stroker: Stroker,
     mesh: Vec<Draw>,
     gradients: IndexSet<Gradient>,
     lyon_mesh: VertexBuffers<Vertex, u32>,
@@ -26,7 +27,7 @@ impl ShapeTessellator {
     pub fn new() -> Self {
         Self {
             fill_tess: FillTessellator::new(),
-            stroke_tess: StrokeTessellator::new(),
+            stroker: Stroker::new(),
             mesh: Vec::new(),
             gradients: IndexSet::new(),
             lyon_mesh: VertexBuffers::new(),
@@ -186,39 +187,51 @@ impl ShapeTessellator {
                     let width = width.max(min_screen_width);
 
                     // Larger scales require more precise tessellation to avoid artifacts
-                    let tolerance = StrokeOptions::DEFAULT_TOLERANCE / scale;
-                    let mut stroke_options = StrokeOptions::default()
-                        .with_line_width(width)
+                    let tolerance = StrokeToFillOptions::DEFAULT_TOLERANCE / scale;
+                    // Subpaths too short for Flash to draw are left out below;
+                    // lyon would draw the caps of zero length ones otherwise.
+                    let mut stroke_options = StrokeToFillOptions::new(width)
                         .with_tolerance(tolerance)
+                        .with_empty_caps(false)
                         .with_start_cap(match style.start_cap() {
-                            swf::LineCapStyle::None => tessellation::LineCap::Butt,
-                            swf::LineCapStyle::Round => tessellation::LineCap::Round,
-                            swf::LineCapStyle::Square => tessellation::LineCap::Square,
+                            swf::LineCapStyle::None => stroke::LineCap::Butt,
+                            swf::LineCapStyle::Round => stroke::LineCap::Round,
+                            swf::LineCapStyle::Square => stroke::LineCap::Square,
                         })
                         .with_end_cap(match style.end_cap() {
-                            swf::LineCapStyle::None => tessellation::LineCap::Butt,
-                            swf::LineCapStyle::Round => tessellation::LineCap::Round,
-                            swf::LineCapStyle::Square => tessellation::LineCap::Square,
+                            swf::LineCapStyle::None => stroke::LineCap::Butt,
+                            swf::LineCapStyle::Round => stroke::LineCap::Round,
+                            swf::LineCapStyle::Square => stroke::LineCap::Square,
                         });
 
                     let line_join = match style.join_style() {
-                        swf::LineJoinStyle::Round => tessellation::LineJoin::Round,
-                        swf::LineJoinStyle::Bevel => tessellation::LineJoin::Bevel,
+                        swf::LineJoinStyle::Round => stroke::LineJoin::Round,
+                        swf::LineJoinStyle::Bevel => stroke::LineJoin::Bevel,
                         swf::LineJoinStyle::Miter(limit) => {
                             // Avoid lyon assert with small miter limits.
                             let limit = limit.to_f32();
-                            if limit >= StrokeOptions::MINIMUM_MITER_LIMIT {
+                            if limit >= StrokeToFillOptions::MINIMUM_MITER_LIMIT {
                                 stroke_options = stroke_options.with_miter_limit(limit);
-                                tessellation::LineJoin::MiterClip
+                                stroke::LineJoin::MiterClip
                             } else {
-                                tessellation::LineJoin::Bevel
+                                stroke::LineJoin::Bevel
                             }
                         }
                     };
                     stroke_options = stroke_options.with_line_join(line_join);
-                    self.stroke_tess.tessellate_path(
-                        &lyon_path,
-                        &stroke_options,
+
+                    // Flash fills the area covered by a stroke once, even where the
+                    // stroke overlaps itself, so convert it to an outline and fill that
+                    // with the non-zero rule instead of tessellating the stroke directly.
+                    let mut outline = Path::builder();
+                    let path = without_short_subpaths(&lyon_path, MIN_STROKE_LENGTH / scale);
+                    self.stroker
+                        .stroke_to_fill(path.iter(), &stroke_options, &mut outline);
+                    self.fill_tess.tessellate_path(
+                        &outline.build(),
+                        &FillOptions::default()
+                            .with_fill_rule(FillRule::NonZero)
+                            .with_tolerance(tolerance),
                         &mut buffers_builder,
                     )
                 }
@@ -388,25 +401,25 @@ fn ruffle_path_to_lyon_path(commands: &[DrawCommand], is_closed: bool) -> Path {
     }
 
     let mut builder = Path::builder();
-    let mut cursor = Some(swf::Point::ZERO);
+    let mut cursor = swf::Point::ZERO;
+    // The start of the current subpath, once it has a segment.
+    let mut start = None;
     for command in commands {
+        if start.is_none() && !matches!(command, DrawCommand::MoveTo(_)) {
+            builder.begin(point(cursor));
+            start = Some(cursor);
+        }
         match command {
-            DrawCommand::MoveTo(move_to) => {
-                if cursor.is_none() {
-                    builder.end(false);
+            DrawCommand::MoveTo(_) => {
+                if let Some(start) = start.take() {
+                    // As in Flash, a subpath that ends where it starts is closed.
+                    builder.end(start == cursor);
                 }
-                cursor = Some(*move_to);
             }
             DrawCommand::LineTo(line_to) => {
-                if let Some(cursor) = cursor.take() {
-                    builder.begin(point(cursor));
-                }
                 builder.line_to(point(*line_to));
             }
             DrawCommand::QuadraticCurveTo { control, anchor } => {
-                if let Some(cursor) = cursor.take() {
-                    builder.begin(point(cursor));
-                }
                 builder.quadratic_bezier_to(point(*control), point(*anchor));
             }
             DrawCommand::CubicCurveTo {
@@ -414,20 +427,14 @@ fn ruffle_path_to_lyon_path(commands: &[DrawCommand], is_closed: bool) -> Path {
                 control_b,
                 anchor,
             } => {
-                if let Some(cursor) = cursor.take() {
-                    builder.begin(point(cursor));
-                }
                 builder.cubic_bezier_to(point(*control_a), point(*control_b), point(*anchor));
             }
         }
+        cursor = command.end_point();
     }
 
-    if cursor.is_none() {
-        if is_closed {
-            builder.close();
-        } else {
-            builder.end(false);
-        }
+    if let Some(start) = start {
+        builder.end(is_closed || start == cursor);
     }
 
     builder.build()
@@ -462,12 +469,58 @@ impl FillVertexConstructor<Vertex> for RuffleVertexCtor {
     }
 }
 
-impl StrokeVertexConstructor<Vertex> for RuffleVertexCtor {
-    fn new_vertex(&mut self, vertex: StrokeVertex) -> Vertex {
-        Vertex {
-            x: vertex.position().x,
-            y: vertex.position().y,
-            color: self.color,
+/// Flash Player draws nothing for a stroked subpath that spans less than about
+/// 3 twips on the screen, whatever its width and caps: measured with straight
+/// lines of 1 to 5 twips and diagonals at scales 0.25, 1 and 4 (2.83 twips
+/// draws nothing, 3 twips draws).
+const MIN_STROKE_LENGTH: f32 = 2.9 / 20.0;
+
+/// The path without the subpaths whose points all lie within `min_length` of
+/// their start (see `MIN_STROKE_LENGTH`), zero length ones included.
+fn without_short_subpaths(path: &Path, min_length: f32) -> Path {
+    use lyon::path::{Event, math::Point};
+
+    let mut builder = Path::builder();
+    let mut subpath: Vec<Event<Point, Point>> = vec![];
+    for event in path.iter() {
+        subpath.push(event);
+        let Event::End { .. } = event else {
+            continue;
+        };
+        let Some(Event::Begin { at: start }) = subpath.first().copied() else {
+            subpath.clear();
+            continue;
+        };
+        let is_short = subpath
+            .iter()
+            .flat_map(|event| match *event {
+                Event::Begin { at } => vec![at],
+                Event::Line { to, .. } => vec![to],
+                Event::Quadratic { ctrl, to, .. } => vec![ctrl, to],
+                Event::Cubic { ctrl1, ctrl2, to, .. } => vec![ctrl1, ctrl2, to],
+                Event::End { .. } => vec![],
+            })
+            .all(|p| (p - start).length() < min_length);
+        for event in subpath.drain(..) {
+            if is_short {
+                continue;
+            }
+            match event {
+                Event::Begin { at } => {
+                    builder.begin(at);
+                }
+                Event::Line { to, .. } => {
+                    builder.line_to(to);
+                }
+                Event::Quadratic { ctrl, to, .. } => {
+                    builder.quadratic_bezier_to(ctrl, to);
+                }
+                Event::Cubic { ctrl1, ctrl2, to, .. } => {
+                    builder.cubic_bezier_to(ctrl1, ctrl2, to);
+                }
+                Event::End { close, .. } => builder.end(close),
+            }
         }
     }
+    builder.build()
 }
