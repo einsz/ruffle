@@ -23,6 +23,9 @@ pub struct BitmapCacheEntry {
     pub commands: CommandList,
     pub clear: Color,
     pub filters: Vec<Filter>,
+    /// The area of the unfiltered object within the bitmap, in pixels. Each
+    /// filter changes it as given by `Filter::calculate_area`.
+    pub filter_source_rect: Rectangle<Twips>,
 }
 
 pub trait RenderBackend: Any {

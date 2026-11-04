@@ -619,7 +619,9 @@ impl<T: RenderTarget + 'static> RenderBackend for WgpuRenderBackend<T> {
                     LayerRef::None,
                     &mut self.offscreen_texture_pool,
                 );
+                let mut filter_source_rect = entry.filter_source_rect;
                 for filter in entry.filters {
+                    let area = filter.calculate_area(filter_source_rect);
                     target = self.descriptors.filters.apply(
                         &self.descriptors,
                         &mut scope.scope(filter.name()),
@@ -627,7 +629,9 @@ impl<T: RenderTarget + 'static> RenderBackend for WgpuRenderBackend<T> {
                         &mut self.active_frame.staging_belt,
                         FilterSource::for_entire_texture(target.color_texture()),
                         filter,
+                        Some(area),
                     );
+                    filter_source_rect = area;
                 }
                 run_copy_pipeline(
                     &self.descriptors,
@@ -851,6 +855,8 @@ impl<T: RenderTarget + 'static> RenderBackend for WgpuRenderBackend<T> {
                 | Filter::ColorMatrixFilter(_)
                 | Filter::ShaderFilter(_)
                 | Filter::BevelFilter(_)
+                | Filter::GradientGlowFilter(_)
+                | Filter::GradientBevelFilter(_)
                 | Filter::DisplacementMapFilter(_)
         )
     }
@@ -898,6 +904,7 @@ impl<T: RenderTarget + 'static> RenderBackend for WgpuRenderBackend<T> {
                 size: source_size,
             },
             filter,
+            None,
         );
 
         let (dest_x, dest_y) = dest_point;
