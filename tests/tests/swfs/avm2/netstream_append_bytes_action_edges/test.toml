@@ -1,0 +1,21 @@
+num_ticks = 300
+
+[player_options]
+with_video = true
+with_audio = true
+
+[audio_assertions.pcm_8_bit_silence]
+frames = { from = 121, to = 137 }
+max_amplitude = 0.01
+
+[audio_assertions.quiet_pcm_16_bit]
+frames = { from = 144, to = 157 }
+min_max_amplitude = 0.02
+max_amplitude = 0.1
+
+[[compilers]]
+type = "Asc"
+target = "test.swf"
+class = "Test"
+scripts = ["Test.as"]
+swf_version = 43
