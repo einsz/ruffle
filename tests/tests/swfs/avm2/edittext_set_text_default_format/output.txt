@@ -1,0 +1,14 @@
+default 10, text = text: 10
+default 10, text = same string: 10
+setTextFormat 20, text = text: 20
+setTextFormat 20, other text: 10
+setTextFormat 20, the same default again, text = text: 10
+default 10, text = text, setTextFormat 20, text = text: 20
+setTextFormat 20, default 10 then 30, text = text: 30
+default 10 only: 30
+first half 20, default red, text = text: 10 10 16711680
+default 15, setTextFormat 20, text = text: 15
+default 15, htmlText, setTextFormat 20, text = text: 20
+default 10, htmlText = htmlText, setTextFormat 20, text = text: 20
+default 15, other text, setTextFormat 20, text = text: 20
+setTextFormat 20, textColor, text = text: 20

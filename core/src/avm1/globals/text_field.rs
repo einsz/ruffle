@@ -159,7 +159,7 @@ fn set_new_text_format<'gc>(
     if let [Value::Object(text_format), ..] = args
         && let NativeObject::TextFormat(text_format) = text_format.native()
     {
-        text_field.set_new_text_format(text_format.borrow().clone());
+        text_field.set_default_text_format(text_format.borrow().clone());
     }
 
     Ok(Value::Undefined)

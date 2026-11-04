@@ -325,7 +325,7 @@ pub fn set_default_text_format<'gc>(
     {
         let new_text_format = args.get_object(activation, 0, "format")?;
         let new_text_format = new_text_format.as_text_format().unwrap();
-        this.set_new_text_format(new_text_format.clone());
+        this.set_default_text_format(new_text_format.clone());
     }
 
     Ok(Value::Undefined)
