@@ -80,6 +80,7 @@ impl Exporter {
                     .map_err(|e| anyhow!(e.to_string()))?,
             )
             .with_locale(DeterministicLocaleBackend::default())
+            .with_video(ruffle_video_software::backend::SoftwareVideoBackend::new())
             .with_movie(movie)
             .with_viewport_dimensions(width, height, self.size.scale)
             .build();
