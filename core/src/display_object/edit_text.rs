@@ -40,6 +40,7 @@ use ruffle_common::utils::HasPrefixField;
 use ruffle_macros::istr;
 use ruffle_render::commands::Command as RenderCommand;
 use ruffle_render::commands::CommandHandler;
+use ruffle_render::matrix3d::Matrix3D;
 use ruffle_render::quality::StageQuality;
 use ruffle_render::transform::Transform;
 use ruffle_wstr::WStrToUtf8;
@@ -1199,14 +1200,16 @@ impl<'gc> EditText<'gc> {
         } else {
             Color::GRAY
         };
-        let selection_box = context.transform_stack.transform().matrix
-            * Matrix::create_box(
-                width.to_pixels() as f32,
-                height.to_pixels() as f32,
-                x_start,
-                line_bounds.origin().y(),
-            );
-        context.commands.draw_rect(color, selection_box);
+        let selection_box = Matrix::create_box(
+            width.to_pixels() as f32,
+            height.to_pixels() as f32,
+            x_start,
+            line_bounds.origin().y(),
+        );
+        context
+            .transform_stack
+            .transform()
+            .draw_rect(&mut context.commands, color, selection_box);
     }
 
     fn render_layout_line(
@@ -1301,7 +1304,7 @@ impl<'gc> EditText<'gc> {
                                 matrix: transform.matrix,
                                 color_transform: ColorTransform::IDENTITY,
                                 perspective_projection: transform.perspective_projection,
-                                tz: transform.tz,
+                                matrix3d: transform.matrix3d,
                             });
                         } else {
                             context.transform_stack.push(transform);
@@ -1352,7 +1355,18 @@ impl<'gc> EditText<'gc> {
         color: Color,
         render_state: &mut EditTextRenderState,
     ) {
-        let mut caret = context.transform_stack.transform().matrix
+        let transform = context.transform_stack.transform();
+        if let Some(matrix3d) = transform.matrix3d {
+            let caret = Matrix::create_box(1.0, height.to_pixels() as f32, x, Twips::ZERO);
+            render_state.draw_caret_command = Some(RenderCommand::DrawRect3D {
+                color,
+                matrix: transform.matrix * caret,
+                matrix3d: matrix3d.multiply(&Matrix3D::from_matrix(caret)),
+            });
+            return;
+        }
+
+        let mut caret = transform.matrix
             * Matrix::create_box_with_rotation(
                 1.0,
                 height.to_pixels() as f32,
@@ -1378,7 +1392,14 @@ impl<'gc> EditText<'gc> {
         y: Twips,
         color: Color,
     ) {
-        let mut underline = context.transform_stack.transform().matrix
+        let transform = context.transform_stack.transform();
+        if transform.matrix3d.is_some() {
+            let underline = Matrix::create_box(width.to_pixels() as f32, 1.0, Twips::ZERO, y);
+            transform.draw_rect(&mut context.commands, color, underline);
+            return;
+        }
+
+        let mut underline = transform.matrix
             * Matrix::create_box_with_rotation(width.to_pixels() as f32, 1.0, 0.0, Twips::ZERO, y);
 
         let pixel_snapping = EditTextPixelSnapping::new(context.stage.quality());
@@ -2694,6 +2715,8 @@ impl<'gc> TDisplayObject<'gc> for EditText<'gc> {
         self.apply_autosize_bounds();
 
         if !context.is_offscreen
+            // The bounds of 3D objects are not projected yet.
+            && !context.transform_stack.is_3d()
             && !self
                 .world_bounds(BoundsMode::Engine)
                 .intersects(&context.stage.view_bounds())
@@ -2737,7 +2760,7 @@ impl<'gc> TDisplayObject<'gc> for EditText<'gc> {
                 .contains(EditTextFlag::BORDER)
                 .then_some(self.0.border_color.get());
 
-            if self.is_device_font() {
+            if self.is_device_font() && !context.transform_stack.is_3d() {
                 self.draw_device_text_box(
                     context,
                     self.0.bounds.get(),
@@ -2754,10 +2777,10 @@ impl<'gc> TDisplayObject<'gc> for EditText<'gc> {
         let mask_bounds = self.0.bounds.get().grow_x(-Self::GUTTER);
         let mask = Matrix::create_box_from_rectangle(&mask_bounds);
 
-        context.commands.draw_rect(
-            Color::WHITE,
-            context.transform_stack.transform().matrix * mask,
-        );
+        context
+            .transform_stack
+            .transform()
+            .draw_rect(&mut context.commands, Color::WHITE, mask);
         context.commands.activate_mask();
 
         context.transform_stack.push(&Transform {
@@ -2777,10 +2800,10 @@ impl<'gc> TDisplayObject<'gc> for EditText<'gc> {
         context.transform_stack.pop();
 
         context.commands.deactivate_mask();
-        context.commands.draw_rect(
-            Color::WHITE,
-            context.transform_stack.transform().matrix * mask,
-        );
+        context
+            .transform_stack
+            .transform()
+            .draw_rect(&mut context.commands, Color::WHITE, mask);
         context.commands.pop_mask();
 
         if let Some(draw_caret_command) = render_state.draw_caret_command {
@@ -2958,6 +2981,28 @@ impl<'gc> EditText<'gc> {
 
         let width = bounds.width().to_pixels() as f32;
         let height = bounds.height().to_pixels() as f32;
+
+        if transform.matrix3d.is_some() {
+            let commands = &mut context.commands;
+            if let Some(background_color) = background_color {
+                let background_color = &transform.color_transform * background_color;
+                let background = Matrix::create_box(width, height, bounds.x_min, bounds.y_min);
+                transform.draw_rect(commands, background_color, background);
+            }
+            if let Some(border_color) = border_color {
+                let border_color = &transform.color_transform * border_color;
+                let one_px = Twips::ONE_PX;
+                for line in [
+                    Matrix::create_box(width, 1.0, bounds.x_min, bounds.y_min),
+                    Matrix::create_box(width, 1.0, bounds.x_min, bounds.y_max - one_px),
+                    Matrix::create_box(1.0, height, bounds.x_min, bounds.y_min),
+                    Matrix::create_box(1.0, height, bounds.x_max - one_px, bounds.y_min),
+                ] {
+                    transform.draw_rect(commands, border_color, line);
+                }
+            }
+            return;
+        }
 
         let mut text_box =
             transform.matrix * Matrix::create_box(width, height, bounds.x_min, bounds.y_min);
