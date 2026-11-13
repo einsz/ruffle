@@ -1203,11 +1203,30 @@ pub fn render_base<'gc>(
                     y_min: Twips::ZERO,
                     y_max: Twips::from_pixels_i32(height as i32),
                 };
+                // The areas that the filters draw to, starting from the image
+                // of the object, which reaches one pixel further right and down
+                // than its bounds (see `filter_source_rect` below).
+                let mut area = Rectangle {
+                    x_max: filter_rect.x_max + Twips::ONE_PX,
+                    y_max: filter_rect.y_max + Twips::ONE_PX,
+                    ..filter_rect
+                };
+                let mut has_gradient_filter = false;
                 let stage_matrix = context.stage.view_matrix();
                 for filter in &mut filters {
                     // Scaling is done by *stage view matrix* only, nothing in-between
                     filter.scale(stage_matrix.a, stage_matrix.d);
                     filter_rect = filter.calculate_dest_rect(filter_rect);
+                    area = filter.calculate_area(area);
+                    has_gradient_filter |= matches!(
+                        filter,
+                        Filter::GradientGlowFilter(_) | Filter::GradientBevelFilter(_)
+                    );
+                    if has_gradient_filter {
+                        // A gradient filter's area can be visible, so it has
+                        // to fit, and it starts from the areas before it.
+                        filter_rect = filter_rect.union(&area);
+                    }
                 }
                 let filter_rect = Rectangle {
                     x_min: filter_rect.x_min.to_pixels().floor() as i32,
@@ -1302,11 +1321,26 @@ pub fn render_base<'gc>(
                 stage: context.stage,
             };
             this.render_self(&mut offscreen_context);
+            // As the areas of gradient filters show, Flash's image of an
+            // object reaches one pixel further right and down than its bounds.
+            let filter_source_rect = Rectangle {
+                x_min: Twips::from_pixels_i32(-cache_info.draw_offset.x),
+                y_min: Twips::from_pixels_i32(-cache_info.draw_offset.y),
+                x_max: Twips::from_pixels(
+                    cache_info.bounds.width().to_pixels().ceil() + 1.0
+                        - f64::from(cache_info.draw_offset.x),
+                ),
+                y_max: Twips::from_pixels(
+                    cache_info.bounds.height().to_pixels().ceil() + 1.0
+                        - f64::from(cache_info.draw_offset.y),
+                ),
+            };
             offscreen_context.cache_draws.push(BitmapCacheEntry {
                 handle: cache_info.bitmap.handle.clone(),
                 commands: offscreen_context.commands,
                 clear: this.opaque_background().unwrap_or_default(),
                 filters: cache_info.filters,
+                filter_source_rect,
             });
         }
 
