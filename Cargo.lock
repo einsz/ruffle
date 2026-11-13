@@ -3076,9 +3076,8 @@ dependencies = [
 
 [[package]]
 name = "lyon"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91e7f9cda98b5430809e63ca5197b06c7d191bf7e26dfc467d5a3f0290e2a74f"
+version = "1.0.19"
+source = "git+https://github.com/nical/lyon?rev=3c1f005#3c1f0053e2cd71e07256e973fe0e095f51d31582"
 dependencies = [
  "lyon_algorithms",
  "lyon_tessellation",
@@ -3086,9 +3085,8 @@ dependencies = [
 
 [[package]]
 name = "lyon_algorithms"
-version = "1.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f13c9be19d257c7d37e70608ed858e8eab4b2afcea2e3c9a622e892acbf43c08"
+version = "1.0.22"
+source = "git+https://github.com/nical/lyon?rev=3c1f005#3c1f0053e2cd71e07256e973fe0e095f51d31582"
 dependencies = [
  "lyon_path",
  "num-traits",
@@ -3096,9 +3094,8 @@ dependencies = [
 
 [[package]]
 name = "lyon_geom"
-version = "1.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8af69edc087272df438b3ee436c4bb6d7c04aa8af665cfd398feae627dbd8570"
+version = "1.0.20"
+source = "git+https://github.com/nical/lyon?rev=3c1f005#3c1f0053e2cd71e07256e973fe0e095f51d31582"
 dependencies = [
  "arrayvec",
  "euclid",
@@ -3107,9 +3104,8 @@ dependencies = [
 
 [[package]]
 name = "lyon_path"
-version = "1.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0047f508cd7a85ad6bad9518f68cce7b1bf6b943fb71f6da0ee3bc1e8cb75f25"
+version = "1.0.19"
+source = "git+https://github.com/nical/lyon?rev=3c1f005#3c1f0053e2cd71e07256e973fe0e095f51d31582"
 dependencies = [
  "lyon_geom",
  "num-traits",
@@ -3117,9 +3113,8 @@ dependencies = [
 
 [[package]]
 name = "lyon_tessellation"
-version = "1.0.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "579d42360a4b09846eff2feef28f538696c7d6c7439bfa65874ff3cbe0951b2c"
+version = "1.0.23"
+source = "git+https://github.com/nical/lyon?rev=3c1f005#3c1f0053e2cd71e07256e973fe0e095f51d31582"
 dependencies = [
  "float_next_after",
  "lyon_path",
