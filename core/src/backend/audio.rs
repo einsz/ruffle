@@ -25,6 +25,7 @@ pub mod swf {
 
 #[cfg(feature = "audio")]
 mod mixer;
+mod mp3_frames;
 #[cfg(feature = "audio")]
 pub use mixer::*;
 
@@ -325,10 +326,17 @@ impl AudioBackend for NullAudioBackend {
             sound.data
         };
 
-        // AS duration does not subtract `skip_sample_frames`.
-        let num_sample_frames: f64 = sound.num_samples.into();
+        // AS duration does not subtract `skip_sample_frames`, and for MP3 sounds is capped at
+        // the samples in the MP3 data, like in `AudioMixer`.
+        let mut num_sample_frames: f64 = sound.num_samples.into();
+        if sound.format.compression == swf::AudioCompression::Mp3 {
+            num_sample_frames = num_sample_frames.min(mp3_frames::mp3_sample_frames(
+                data,
+                sound.format.sample_rate,
+            ));
+        }
         let sample_rate: f64 = sound.format.sample_rate.into();
-        let duration = FloatDuration::from_millis(num_sample_frames * 1000.0 / sample_rate);
+        let duration = FloatDuration::from_millis(num_sample_frames / (sample_rate / 1000.0));
 
         Ok(self.sounds.insert(NullSound {
             duration,
